@@ -1,0 +1,26 @@
+[07-Sep-2026 12:37:01 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1045] Access denied for user 'your_database_username'@'localhost' (using password: YES) in /home/madahino/football.madahinote.ir/app/Core/Database.php:31
+Stack trace:
+#0 /home/madahino/football.madahinote.ir/app/Core/Database.php(31): PDO->__construct('mysql:host=127....', 'your_database_u...', 'your_database_p...', Array)
+#1 /home/madahino/football.madahinote.ir/bootstrap.php(54): App\Core\Database::init(Array)
+#2 /home/madahino/football.madahinote.ir/index.php(10): require('/home/madahino/...')
+#3 {main}
+  thrown in /home/madahino/football.madahinote.ir/app/Core/Database.php on line 31
+[10-Sep-2026 05:23:52 UTC] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'p.invoice_id' in 'ON'
+[10-Sep-2026 05:24:05 UTC] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'p.invoice_id' in 'ON'
+[10-Sep-2026 05:28:02 UTC] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'p.invoice_id' in 'ON'
+[10-Sep-2026 16:07:08 UTC] SQLSTATE[HY000]: General error: 1364 Field 'avatar_path' doesn't have a default value
+[11-Sep-2026 05:43:37 UTC] PHP Warning:  Undefined variable $avatarFile in /home/madahino/football.madahinote.ir/app/Services/PlayerService.php on line 103
+[11-Sep-2026 06:35:08 UTC] Class "App\Controllers\AvatarService" not found
+[11-Sep-2026 06:52:37 UTC] Call to undefined method App\Services\PlayerService::guardians()
+[11-Sep-2026 07:18:00 UTC] Call to undefined method App\Services\PlayerService::guardians()
+[11-Sep-2026 07:18:13 UTC] Call to undefined method App\Services\PlayerService::guardians()
+[11-Sep-2026 07:27:00 UTC] Call to undefined method App\Services\PlayerService::guardians()
+[11-Sep-2026 07:39:29 UTC] Call to undefined method App\Services\PlayerService::guardians()
+[11-Sep-2026 07:39:46 UTC] Call to undefined method App\Services\PlayerService::guardians()
+[11-Sep-2026 08:12:18 UTC] Call to undefined method App\Services\PlayerService::guardians()
+[11-Sep-2026 08:34:43 UTC] Call to undefined method App\Services\PlayerService::guardians()
+[11-Sep-2026 08:39:20 UTC] Call to undefined method App\Services\PlayerService::guardians()
+[11-Sep-2026 08:41:03 UTC] Call to undefined method App\Services\PlayerService::guardians()
+[11-Sep-2026 09:46:42 UTC] Call to undefined method App\Services\PlayerService::guardians()
+[11-Sep-2026 09:49:17 UTC] Call to undefined method App\Services\PlayerService::guardians()
+[11-Sep-2026 11:04:21 UTC] Call to undefined method App\Services\PlayerService::guardians()

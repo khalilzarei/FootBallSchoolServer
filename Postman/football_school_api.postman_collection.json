@@ -1,0 +1,2350 @@
+{
+  "info": {
+    "name": "Football School API",
+    "description": "مجموعه کامل APIهای سامانه مدرسه فوتبال",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8080",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "01 - Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.success && json.data && json.data.token) {",
+                  "    pm.collectionVariables.set('token', json.data.token);",
+                  "    console.log('Token saved: ' + json.data.token.substring(0, 20) + '...');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"09120000000\",\n  \"password\": \"Admin@1234\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "ورود با موبایل یا کد ملی. توکن به‌صورت خودکار در متغیر ذخیره می‌شود."
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "me"]
+            },
+            "description": "دریافت اطلاعات کاربر لاگین‌شده"
+          }
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"old_password\": \"Admin@1234\",\n  \"new_password\": \"NewAdmin@1234\",\n  \"new_password_confirmation\": \"NewAdmin@1234\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/change-password",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "change-password"]
+            },
+            "description": "تغییر رمز عبور کاربر فعلی"
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "logout"]
+            },
+            "description": "خروج از حساب کاربری و ابطال توکن"
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - Users",
+      "item": [
+        {
+          "name": "List Users",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/users?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "role", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true },
+                { "key": "q", "value": "", "disabled": true }
+              ]
+            },
+            "description": "لیست کاربران با فیلترهای نقش، وضعیت و جستجو"
+          }
+        },
+        {
+          "name": "Create User - Coach",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"مربی تست\",\n  \"mobile\": \"09121111111\",\n  \"national_code\": \"0012345678\",\n  \"role\": \"coach\",\n  \"status\": \"active\",\n  \"password\": \"Coach@1234\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users"]
+            },
+            "description": "ایجاد کاربر مربی"
+          }
+        },
+        {
+          "name": "Create User - Guardian",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"سرپرست تست\",\n  \"mobile\": \"09122222222\",\n  \"national_code\": \"0012345679\",\n  \"role\": \"guardian\",\n  \"status\": \"active\",\n  \"password\": \"Guardian@1234\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users"]
+            },
+            "description": "ایجاد کاربر سرپرست"
+          }
+        },
+        {
+          "name": "Get User",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "1"]
+            }
+          }
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"نام به‌روزشده\",\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "1"]
+            }
+          }
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"NewPassword@1234\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/1/reset-password",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "1", "reset-password"]
+            },
+            "description": "ریست رمز عبور کاربر. اگر رمز فرستاده نشود، رمز تصادفی ساخته و برگردانده می‌شود."
+          }
+        },
+        {
+          "name": "Activate User",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/1/activate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "1", "activate"]
+            }
+          }
+        },
+        {
+          "name": "Deactivate User",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/1/deactivate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "1", "deactivate"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - Guardians",
+      "item": [
+        {
+          "name": "List Guardians",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/guardians?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "guardians"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "q", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Guardian",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/guardians/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "guardians", "1"]
+            }
+          }
+        },
+        {
+          "name": "Update Guardian",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"address\": \"تهران، خیابان ولیعصر\",\n  \"emergency_phone\": \"09120000000\",\n  \"notes\": \"توضیحات\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/guardians/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "guardians", "1"]
+            }
+          }
+        },
+        {
+          "name": "Guardian Players",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/guardians/1/players",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "guardians", "1", "players"]
+            }
+          }
+        },
+        {
+          "name": "Attach Player To Guardian",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player_id\": 1,\n  \"relation\": \"father\",\n  \"is_primary\": true,\n  \"can_view_reports\": true,\n  \"can_pay\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/guardians/1/players",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "guardians", "1", "players"]
+            }
+          }
+        },
+        {
+          "name": "Detach Player From Guardian",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/v1/guardians/1/players/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "guardians", "1", "players", "1"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 - Players",
+      "item": [
+        {
+          "name": "List Players",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "q", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Player",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"علی\",\n  \"last_name\": \"محمدی\",\n  \"national_code\": \"0012345680\",\n  \"birth_date\": \"2015-06-15\",\n  \"gender\": \"male\",\n  \"status\": \"active\",\n  \"medical_notes\": \"\",\n  \"notes\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/players",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players"]
+            }
+          }
+        },
+        {
+          "name": "Get Player",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players", "1"]
+            }
+          }
+        },
+        {
+          "name": "Update Player",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"علی\",\n  \"last_name\": \"محمدی\",\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players", "1"]
+            }
+          }
+        },
+        {
+          "name": "Player Guardians",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/1/guardians",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players", "1", "guardians"]
+            }
+          }
+        },
+        {
+          "name": "Attach Guardian To Player",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"guardian_id\": 1,\n  \"relation\": \"father\",\n  \"is_primary\": true,\n  \"can_view_reports\": true,\n  \"can_pay\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/1/guardians",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players", "1", "guardians"]
+            }
+          }
+        },
+        {
+          "name": "Detach Guardian From Player",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/1/guardians/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players", "1", "guardians", "1"]
+            }
+          }
+        },
+        {
+          "name": "Player Attendances",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/1/attendances",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players", "1", "attendances"]
+            }
+          }
+        },
+        {
+          "name": "Player Evaluations",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/1/evaluations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players", "1", "evaluations"]
+            }
+          }
+        },
+        {
+          "name": "Player Invoices",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/1/invoices",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players", "1", "invoices"]
+            }
+          }
+        },
+        {
+          "name": "Player Payments",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/1/payments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players", "1", "payments"]
+            }
+          }
+        },
+        {
+          "name": "Player Balance",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/1/balance",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players", "1", "balance"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 - Seasons",
+      "item": [
+        {
+          "name": "List Seasons",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/seasons?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "seasons"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "q", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Season",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"فصل ۲۰۲۵\",\n  \"start_date\": \"2025-01-01\",\n  \"end_date\": \"2025-12-29\",\n  \"age_cutoff_date\": \"2025-01-01\",\n  \"status\": \"active\",\n  \"notes\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/seasons",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "seasons"]
+            }
+          }
+        },
+        {
+          "name": "Get Season",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/seasons/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "seasons", "1"]
+            }
+          }
+        },
+        {
+          "name": "Update Season",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"فصل ۲۰۲۵\",\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/seasons/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "seasons", "1"]
+            }
+          }
+        },
+        {
+          "name": "Activate Season",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/seasons/1/activate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "seasons", "1", "activate"]
+            }
+          }
+        },
+        {
+          "name": "Deactivate Season",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/seasons/1/deactivate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "seasons", "1", "deactivate"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 - Age Groups",
+      "item": [
+        {
+          "name": "List Age Groups",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/age-groups?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "age-groups"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "season_id", "value": "", "disabled": true },
+                { "key": "q", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Age Group",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"season_id\": 1,\n  \"title\": \"زیر ۱۰ سال\",\n  \"birth_date_from\": \"2015-01-01\",\n  \"birth_date_to\": \"2015-12-29\",\n  \"min_age_at_cutoff\": 9,\n  \"max_age_at_cutoff\": 10,\n  \"sort_order\": 1,\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/age-groups",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "age-groups"]
+            }
+          }
+        },
+        {
+          "name": "Get Age Group",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/age-groups/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "age-groups", "1"]
+            }
+          }
+        },
+        {
+          "name": "Update Age Group",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"زیر ۱۰ سال\",\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/age-groups/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "age-groups", "1"]
+            }
+          }
+        },
+        {
+          "name": "Activate Age Group",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/age-groups/1/activate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "age-groups", "1", "activate"]
+            }
+          }
+        },
+        {
+          "name": "Deactivate Age Group",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/age-groups/1/deactivate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "age-groups", "1", "deactivate"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 - Coaches",
+      "item": [
+        {
+          "name": "List Coaches",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/coaches?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "coaches"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "q", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Coach",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/coaches/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "coaches", "1"]
+            }
+          }
+        },
+        {
+          "name": "Update Coach",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"specialty\": \"مربی دروازه‌بان\",\n  \"license_level\": \"C\",\n  \"bio\": \"مربی با ۱۰ سال سابقه\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/coaches/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "coaches", "1"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 - Classes",
+      "item": [
+        {
+          "name": "List Classes",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/classes?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "classes"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "q", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true },
+                { "key": "age_group_id", "value": "", "disabled": true },
+                { "key": "coach_id", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Class",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"کلاس زیر ۱۰ سال\",\n  \"age_group_id\": 1,\n  \"coach_id\": 1,\n  \"assistant_coach_id\": null,\n  \"capacity\": 20,\n  \"status\": \"active\",\n  \"location\": \"زمین شماره ۱\",\n  \"description\": \"\",\n  \"pricing_type\": \"monthly\",\n  \"monthly_fee\": 500000,\n  \"session_fee\": 50000,\n  \"registration_fee\": 100000,\n  \"start_date\": \"2025-01-01\",\n  \"end_date\": \"2025-12-29\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/classes",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "classes"]
+            }
+          }
+        },
+        {
+          "name": "Get Class",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/classes/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "classes", "1"]
+            }
+          }
+        },
+        {
+          "name": "Update Class",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"کلاس زیر ۱۰ سال\",\n  \"capacity\": 25,\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/classes/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "classes", "1"]
+            }
+          }
+        },
+        {
+          "name": "Activate Class",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/classes/1/activate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "classes", "1", "activate"]
+            }
+          }
+        },
+        {
+          "name": "Deactivate Class",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/classes/1/deactivate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "classes", "1", "deactivate"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 - Class Schedules",
+      "item": [
+        {
+          "name": "Class Schedules",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/classes/1/schedules",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "classes", "1", "schedules"]
+            }
+          }
+        },
+        {
+          "name": "Create Schedule",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"weekday\": 1,\n  \"start_time\": \"17:00\",\n  \"end_time\": \"18:30\",\n  \"location\": \"زمین شماره ۱\",\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/classes/1/schedules",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "classes", "1", "schedules"]
+            }
+          }
+        },
+        {
+          "name": "Update Schedule",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"weekday\": 1,\n  \"start_time\": \"18:00\",\n  \"end_time\": \"19:30\",\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/schedules/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "schedules", "1"]
+            }
+          }
+        },
+        {
+          "name": "Activate Schedule",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/schedules/1/activate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "schedules", "1", "activate"]
+            }
+          }
+        },
+        {
+          "name": "Deactivate Schedule",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/schedules/1/deactivate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "schedules", "1", "deactivate"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 - Enrollments",
+      "item": [
+        {
+          "name": "Class Players",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/classes/1/players?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "classes", "1", "players"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "q", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Enroll Player",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player_id\": 1,\n  \"status\": \"active\",\n  \"enrolled_at\": \"2025-01-01\",\n  \"ended_at\": null,\n  \"monthly_fee_override\": null,\n  \"session_fee_override\": null,\n  \"registration_fee_override\": null,\n  \"notes\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/classes/1/players",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "classes", "1", "players"]
+            }
+          }
+        },
+        {
+          "name": "Get Enrollment",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/enrollments/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "enrollments", "1"]
+            }
+          }
+        },
+        {
+          "name": "Update Enrollment",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"active\",\n  \"notes\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/enrollments/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "enrollments", "1"]
+            }
+          }
+        },
+        {
+          "name": "Activate Enrollment",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/enrollments/1/activate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "enrollments", "1", "activate"]
+            }
+          }
+        },
+        {
+          "name": "Deactivate Enrollment",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/enrollments/1/deactivate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "enrollments", "1", "deactivate"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 - Sessions",
+      "item": [
+        {
+          "name": "List Sessions",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/sessions?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sessions"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "class_id", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true },
+                { "key": "date_from", "value": "", "disabled": true },
+                { "key": "date_to", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"class_id\": 1,\n  \"session_date\": \"2025-06-15\",\n  \"start_time\": \"17:00\",\n  \"end_time\": \"18:30\",\n  \"location\": \"زمین شماره ۱\",\n  \"status\": \"scheduled\",\n  \"topic\": \"تمرین پاس\",\n  \"notes\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/sessions",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sessions"]
+            }
+          }
+        },
+        {
+          "name": "Generate Sessions",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"class_id\": 1,\n  \"from_date\": \"2025-06-01\",\n  \"to_date\": \"2025-06-30\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/sessions/generate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sessions", "generate"]
+            },
+            "description": "تولید خودکار جلسات از برنامه هفتگی کلاس"
+          }
+        },
+        {
+          "name": "Get Session",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/sessions/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sessions", "1"]
+            }
+          }
+        },
+        {
+          "name": "Update Session",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"topic\": \"تمرین شوت\",\n  \"notes\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/sessions/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sessions", "1"]
+            }
+          }
+        },
+        {
+          "name": "Cancel Session",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/sessions/1/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sessions", "1", "cancel"]
+            }
+          }
+        },
+        {
+          "name": "Complete Session",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/sessions/1/complete",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sessions", "1", "complete"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "12 - Attendance",
+      "item": [
+        {
+          "name": "Session Attendance",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/sessions/1/attendance",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sessions", "1", "attendance"]
+            }
+          }
+        },
+        {
+          "name": "Save Bulk Attendance",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"player_id\": 1,\n      \"status\": \"present\",\n      \"is_billable\": true,\n      \"note\": \"\"\n    },\n    {\n      \"player_id\": 2,\n      \"status\": \"absent\",\n      \"is_billable\": false,\n      \"note\": \"غیبت بدون اطلاع\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/sessions/1/attendance",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sessions", "1", "attendance"]
+            }
+          }
+        },
+        {
+          "name": "Player Attendances",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/1/attendances",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players", "1", "attendances"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "13 - Evaluations",
+      "item": [
+        {
+          "name": "List Evaluations",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/evaluations?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "evaluations"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "player_id", "value": "", "disabled": true },
+                { "key": "session_id", "value": "", "disabled": true },
+                { "key": "coach_id", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Evaluation",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player_id\": 1,\n  \"session_id\": 1,\n  \"coach_id\": 1,\n  \"evaluation_type\": \"session\",\n  \"technical_score\": 8,\n  \"discipline_score\": 9,\n  \"physical_score\": 7,\n  \"teamwork_score\": 8,\n  \"overall_score\": 8,\n  \"strengths\": \"پاس‌کاری عالی\",\n  \"weaknesses\": \"نیاز به تمرین شوت\",\n  \"notes\": \"\",\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/evaluations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "evaluations"]
+            }
+          }
+        },
+        {
+          "name": "Get Evaluation",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/evaluations/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "evaluations", "1"]
+            }
+          }
+        },
+        {
+          "name": "Update Evaluation",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"technical_score\": 9,\n  \"notes\": \"بهبود قابل توجه\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/evaluations/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "evaluations", "1"]
+            }
+          }
+        },
+        {
+          "name": "Player Evaluations",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/1/evaluations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players", "1", "evaluations"]
+            }
+          }
+        },
+        {
+          "name": "Session Evaluations",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/sessions/1/evaluations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sessions", "1", "evaluations"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "14 - Invoices",
+      "item": [
+        {
+          "name": "List Invoices",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/invoices?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "invoices"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "player_id", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true },
+                { "key": "invoice_type", "value": "", "disabled": true },
+                { "key": "q", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Invoice",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player_id\": 1,\n  \"invoice_type\": \"monthly\",\n  \"period_start_date\": \"2025-06-01\",\n  \"period_end_date\": \"2025-06-30\",\n  \"due_date\": \"2025-06-15\",\n  \"notes\": \"\",\n  \"items\": [\n    {\n      \"title\": \"شهریه ماهانه خرداد\",\n      \"item_type\": \"monthly\",\n      \"amount\": 500000,\n      \"quantity\": 1,\n      \"description\": \"\"\n    }\n  ],\n  \"discounts\": []\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/invoices",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "invoices"]
+            }
+          }
+        },
+        {
+          "name": "Get Invoice",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/invoices/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "invoices", "1"]
+            }
+          }
+        },
+        {
+          "name": "Cancel Invoice",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/invoices/1/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "invoices", "1", "cancel"]
+            }
+          }
+        },
+        {
+          "name": "Add Invoice Item",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"آیتم جدید\",\n  \"item_type\": \"manual\",\n  \"amount\": 100000,\n  \"quantity\": 1,\n  \"description\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/invoices/1/items",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "invoices", "1", "items"]
+            }
+          }
+        },
+        {
+          "name": "Update Invoice Item",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"آیتم به‌روزشده\",\n  \"amount\": 150000\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/invoice-items/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "invoice-items", "1"]
+            }
+          }
+        },
+        {
+          "name": "Delete Invoice Item",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/v1/invoice-items/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "invoice-items", "1"]
+            }
+          }
+        },
+        {
+          "name": "Apply Discount To Invoice",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"discount_id\": 1,\n  \"description\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/invoices/1/discounts",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "invoices", "1", "discounts"]
+            }
+          }
+        },
+        {
+          "name": "Add Installment",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 250000,\n  \"due_date\": \"2025-06-30\",\n  \"notes\": \"قسط اول\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/invoices/1/installments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "invoices", "1", "installments"]
+            }
+          }
+        },
+        {
+          "name": "List Installments",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/invoices/1/installments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "invoices", "1", "installments"]
+            }
+          }
+        },
+        {
+          "name": "Player Invoices",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/1/invoices",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players", "1", "invoices"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "15 - Discounts",
+      "item": [
+        {
+          "name": "List Discounts",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/discounts?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "discounts"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "q", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Discount",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"تخفیف تابستانی\",\n  \"discount_type\": \"percent\",\n  \"value\": 10,\n  \"applies_to\": \"any\",\n  \"auto_apply\": false,\n  \"start_date\": \"2025-06-01\",\n  \"end_date\": \"2025-08-30\",\n  \"status\": \"active\",\n  \"description\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/discounts",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "discounts"]
+            }
+          }
+        },
+        {
+          "name": "Get Discount",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/discounts/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "discounts", "1"]
+            }
+          }
+        },
+        {
+          "name": "Update Discount",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"تخفیف تابستانی\",\n  \"value\": 15\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/discounts/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "discounts", "1"]
+            }
+          }
+        },
+        {
+          "name": "Activate Discount",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/discounts/1/activate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "discounts", "1", "activate"]
+            }
+          }
+        },
+        {
+          "name": "Deactivate Discount",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/discounts/1/deactivate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "discounts", "1", "deactivate"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "16 - Payments",
+      "item": [
+        {
+          "name": "List Payments",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/payments?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "payments"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "player_id", "value": "", "disabled": true },
+                { "key": "invoice_id", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Payment - Pending",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player_id\": 1,\n  \"invoice_id\": 1,\n  \"installment_id\": null,\n  \"amount\": 500000,\n  \"payment_method\": \"card_transfer\",\n  \"status\": \"pending\",\n  \"receipt_media_id\": null,\n  \"notes\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/payments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "payments"]
+            }
+          }
+        },
+        {
+          "name": "Create Payment - Approved",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player_id\": 1,\n  \"invoice_id\": 1,\n  \"installment_id\": null,\n  \"amount\": 500000,\n  \"payment_method\": \"cash\",\n  \"status\": \"approved\",\n  \"receipt_media_id\": null,\n  \"notes\": \"پرداخت نقدی\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/payments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "payments"]
+            }
+          }
+        },
+        {
+          "name": "Get Payment",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/payments/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "payments", "1"]
+            }
+          }
+        },
+        {
+          "name": "Approve Payment",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/payments/1/approve",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "payments", "1", "approve"]
+            }
+          }
+        },
+        {
+          "name": "Reject Payment",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/payments/1/reject",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "payments", "1", "reject"]
+            }
+          }
+        },
+        {
+          "name": "Player Balance",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/1/balance",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players", "1", "balance"]
+            }
+          }
+        },
+        {
+          "name": "Player Payments",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/1/payments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "players", "1", "payments"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "17 - Media",
+      "item": [
+        {
+          "name": "List Media",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/media?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "media"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "status", "value": "", "disabled": true },
+                { "key": "visibility", "value": "", "disabled": true },
+                { "key": "file_type", "value": "", "disabled": true },
+                { "key": "related_type", "value": "", "disabled": true },
+                { "key": "related_id", "value": "", "disabled": true },
+                { "key": "q", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Upload Media",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": [] },
+                { "key": "visibility", "value": "public", "type": "text" },
+                { "key": "related_type", "value": "general", "type": "text" },
+                { "key": "related_id", "value": "", "type": "text", "disabled": true },
+                { "key": "description", "value": "", "type": "text", "disabled": true },
+                { "key": "audiences", "value": "[]", "type": "text", "disabled": true }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/media/upload",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "media", "upload"]
+            },
+            "description": "آپلود فایل. فایل را در فیلد file انتخاب کنید."
+          }
+        },
+        {
+          "name": "Get Media",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/media/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "media", "1"]
+            }
+          }
+        },
+        {
+          "name": "Download Media",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/media/1/download",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "media", "1", "download"]
+            }
+          }
+        },
+        {
+          "name": "Set Media Audiences",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"audiences\": [\n    {\n      \"audience_type\": \"class\",\n      \"target_id\": 1\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/media/1/audiences",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "media", "1", "audiences"]
+            }
+          }
+        },
+        {
+          "name": "Delete Media",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/v1/media/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "media", "1"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "18 - News",
+      "item": [
+        {
+          "name": "List News",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/news?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "news"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "q", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create News",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"خبر جدید\",\n  \"body\": \"متن کامل خبر\",\n  \"status\": \"published\",\n  \"publish_at\": null,\n  \"audiences\": [\n    {\n      \"audience_type\": \"global\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/news",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "news"]
+            }
+          }
+        },
+        {
+          "name": "Get News",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/news/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "news", "1"]
+            }
+          }
+        },
+        {
+          "name": "Update News",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"خبر به‌روزشده\",\n  \"body\": \"متن جدید\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/news/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "news", "1"]
+            }
+          }
+        },
+        {
+          "name": "Publish News",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/news/1/publish",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "news", "1", "publish"]
+            }
+          }
+        },
+        {
+          "name": "Archive News",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/news/1/archive",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "news", "1", "archive"]
+            }
+          }
+        },
+        {
+          "name": "Delete News",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/v1/news/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "news", "1"]
+            }
+          }
+        },
+        {
+          "name": "Set News Audiences",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"audiences\": [\n    {\n      \"audience_type\": \"class\",\n      \"target_id\": 1\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/news/1/audiences",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "news", "1", "audiences"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "19 - Matches",
+      "item": [
+        {
+          "name": "List Matches",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/matches?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "matches"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "q", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true },
+                { "key": "class_id", "value": "", "disabled": true },
+                { "key": "age_group_id", "value": "", "disabled": true },
+                { "key": "date_from", "value": "", "disabled": true },
+                { "key": "date_to", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Match",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"مسابقه دوستانه\",\n  \"match_type\": \"friendly\",\n  \"class_id\": 1,\n  \"age_group_id\": null,\n  \"opponent_team\": \"تیم حریف\",\n  \"match_date\": \"2025-07-01\",\n  \"match_time\": \"16:00\",\n  \"location\": \"زمین شماره ۲\",\n  \"status\": \"planned\",\n  \"notes\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/matches",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "matches"]
+            }
+          }
+        },
+        {
+          "name": "Get Match",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/matches/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "matches", "1"]
+            }
+          }
+        },
+        {
+          "name": "Update Match",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"مسابقه دوستانه\",\n  \"status\": \"confirmed\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/matches/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "matches", "1"]
+            }
+          }
+        },
+        {
+          "name": "Cancel Match",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/matches/1/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "matches", "1", "cancel"]
+            }
+          }
+        },
+        {
+          "name": "Set Match Result",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"home_score\": 3,\n  \"away_score\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/matches/1/result",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "matches", "1", "result"]
+            }
+          }
+        },
+        {
+          "name": "Add Player To Match",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player_id\": 1,\n  \"invitation_status\": \"invited\",\n  \"attendance_status\": null,\n  \"jersey_number\": 10,\n  \"position\": \"مهاجم\",\n  \"goals\": 0,\n  \"assists\": 0,\n  \"yellow_cards\": 0,\n  \"red_cards\": 0,\n  \"minutes_played\": null,\n  \"rating\": null,\n  \"notes\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/matches/1/players",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "matches", "1", "players"]
+            }
+          }
+        },
+        {
+          "name": "Update Match Player",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invitation_status\": \"accepted\",\n  \"attendance_status\": \"present\",\n  \"goals\": 2,\n  \"assists\": 1,\n  \"minutes_played\": 90,\n  \"rating\": 8.5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/match-players/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "match-players", "1"]
+            }
+          }
+        },
+        {
+          "name": "Remove Player From Match",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/v1/match-players/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "match-players", "1"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "20 - Notifications",
+      "item": [
+        {
+          "name": "List Notifications",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/notifications?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "notifications"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "unread_only", "value": "", "disabled": true },
+                { "key": "type", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Unread Count",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/notifications/unread-count",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "notifications", "unread-count"]
+            }
+          }
+        },
+        {
+          "name": "Read Notification",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/notifications/1/read",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "notifications", "1", "read"]
+            }
+          }
+        },
+        {
+          "name": "Read All Notifications",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/notifications/read-all",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "notifications", "read-all"]
+            }
+          }
+        },
+        {
+          "name": "Send Notification - To User",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"اعلان جدید\",\n  \"body\": \"متن اعلان\",\n  \"type\": \"info\",\n  \"user_id\": 1,\n  \"data\": {}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/notifications/send",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "notifications", "send"]
+            }
+          }
+        },
+        {
+          "name": "Send Notification - To Role",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"اعلان عمومی\",\n  \"body\": \"متن اعلان برای همه سرپرست‌ها\",\n  \"type\": \"info\",\n  \"role\": \"guardian\",\n  \"data\": {}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/notifications/send",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "notifications", "send"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "21 - Settings",
+      "item": [
+        {
+          "name": "Get Settings",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/settings",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "settings"]
+            }
+          }
+        },
+        {
+          "name": "Update Settings",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"settings\": [\n    {\n      \"key\": \"currency_label\",\n      \"value\": \"تومان\",\n      \"value_type\": \"string\",\n      \"description\": \"واحد پول سیستم\"\n    },\n    {\n      \"key\": \"media_max_upload_size_mb\",\n      \"value\": \"200\",\n      \"value_type\": \"number\",\n      \"description\": \"حداکثر حجم آپلود رسانه\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/settings",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "settings"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "22 - Chat",
+      "item": [
+        {
+          "name": "List Chat Rooms",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/rooms",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "chat", "rooms"]
+            }
+          }
+        },
+        {
+          "name": "Create Chat Room",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"room_type\": \"guardian_admin\",\n  \"target_user_id\": 1,\n  \"player_id\": null,\n  \"class_id\": null,\n  \"subject\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/rooms",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "chat", "rooms"]
+            }
+          }
+        },
+        {
+          "name": "Get Chat Room",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/rooms/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "chat", "rooms", "1"]
+            }
+          }
+        },
+        {
+          "name": "Get Chat Messages",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/rooms/1/messages?limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "chat", "rooms", "1", "messages"],
+              "query": [
+                { "key": "limit", "value": "50" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Send Chat Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message_type\": \"text\",\n  \"body\": \"سلام، وقت بخیر\",\n  \"media_id\": null\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/rooms/1/messages",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "chat", "rooms", "1", "messages"]
+            }
+          }
+        },
+        {
+          "name": "Mark Chat As Read",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"last_read_message_id\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/rooms/1/read",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "chat", "rooms", "1", "read"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "23 - Reports",
+      "item": [
+        {
+          "name": "Dashboard Report",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/reports/dashboard",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "reports", "dashboard"]
+            }
+          }
+        },
+        {
+          "name": "Finance Report",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/reports/finance",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "reports", "finance"]
+            }
+          }
+        },
+        {
+          "name": "Debts Report",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/reports/debts",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "reports", "debts"]
+            }
+          }
+        },
+        {
+          "name": "Attendance Report",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/reports/attendance",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "reports", "attendance"],
+              "query": [
+                { "key": "session_id", "value": "", "disabled": true },
+                { "key": "class_id", "value": "", "disabled": true },
+                { "key": "date_from", "value": "", "disabled": true },
+                { "key": "date_to", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Classes Report",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/reports/classes",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "reports", "classes"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "24 - Client / Me",
+      "item": [
+        {
+          "name": "My Children",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/children",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "me", "children"]
+            }
+          }
+        },
+        {
+          "name": "My Schedule",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/schedule",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "me", "schedule"]
+            }
+          }
+        },
+        {
+          "name": "My News",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/news",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "me", "news"]
+            }
+          }
+        },
+        {
+          "name": "My Media",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/media",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "me", "media"]
+            }
+          }
+        },
+        {
+          "name": "My Finance",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/finance",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "me", "finance"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "00 - Ping",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/ping",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "ping"]
+            },
+            "description": "بررسی سلامت سرور"
+          }
+        }
+      ]
+    }
+  ]
+}

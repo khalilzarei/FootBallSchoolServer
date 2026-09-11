@@ -1,0 +1,103 @@
+backend/
+├── public/
+│   └── index.php
+├── app/
+│   ├── Core/
+│   │   ├── AppException.php
+│   │   ├── Auth.php
+│   │   ├── Config.php
+│   │   ├── Database.php
+│   │   ├── Request.php
+│   │   ├── Response.php
+│   │   ├── Router.php
+│   │   └── Validator.php
+│   ├── Controllers/
+│   │   ├── AuthController.php
+│   │   ├── UserController.php
+│   │   ├── GuardianController.php
+│   │   ├── PlayerController.php
+│   │   ├── SeasonController.php
+│   │   ├── AgeGroupController.php
+│   │   ├── CoachController.php
+│   │   ├── ClassController.php
+│   │   ├── ClassScheduleController.php
+│   │   ├── EnrollmentController.php
+│   │   ├── SessionController.php
+│   │   ├── AttendanceController.php
+│   │   ├── EvaluationController.php
+│   │   ├── InvoiceController.php
+│   │   ├── DiscountController.php
+│   │   ├── PaymentController.php
+│   │   ├── MediaController.php
+│   │   ├── NewsController.php
+│   │   ├── MatchController.php
+│   │   ├── NotificationController.php
+│   │   ├── SettingController.php
+│   │   ├── ChatController.php
+│   │   ├── ReportController.php
+│   │   └── ClientController.php
+│   ├── Repositories/
+│   │   ├── UserRepository.php
+│   │   ├── UserTokenRepository.php
+│   │   ├── GuardianRepository.php
+│   │   ├── PlayerRepository.php
+│   │   ├── GuardianPlayerRepository.php
+│   │   ├── SeasonRepository.php
+│   │   ├── AgeGroupRepository.php
+│   │   ├── CoachRepository.php
+│   │   ├── ClassRepository.php
+│   │   ├── ClassScheduleRepository.php
+│   │   ├── EnrollmentRepository.php
+│   │   ├── SessionRepository.php
+│   │   ├── AttendanceRepository.php
+│   │   ├── EvaluationRepository.php
+│   │   ├── InvoiceRepository.php
+│   │   ├── DiscountRepository.php
+│   │   ├── PaymentRepository.php
+│   │   ├── MediaRepository.php
+│   │   ├── NewsRepository.php
+│   │   ├── MatchRepository.php
+│   │   ├── NotificationRepository.php
+│   │   ├── SettingRepository.php
+│   │   ├── ChatRepository.php
+│   │   ├── ReportRepository.php
+│   │   └── ClientRepository.php
+│   └── Services/
+│       ├── AuthService.php
+│       ├── UserService.php
+│       ├── GuardianService.php
+│       ├── PlayerService.php
+│       ├── SeasonService.php
+│       ├── AgeGroupService.php
+│       ├── CoachService.php
+│       ├── ClassService.php
+│       ├── ClassScheduleService.php
+│       ├── EnrollmentService.php
+│       ├── SessionService.php
+│       ├── AttendanceService.php
+│       ├── EvaluationService.php
+│       ├── InvoiceService.php
+│       ├── DiscountService.php
+│       ├── PaymentService.php
+│       ├── MediaService.php
+│       ├── NewsService.php
+│       ├── MatchService.php
+│       ├── NotificationService.php
+│       ├── SettingService.php
+│       ├── ChatService.php
+│       ├── ReportService.php
+│       └── ClientService.php
+├── config/
+│   ├── config.php
+│   └── database.php
+├── routes/
+│   └── api.php
+├── storage/
+│   ├── logs/
+│   ├── uploads/
+│   ├── media/
+│   └── thumbnails/
+├── scripts/
+│   └── create_admin.php
+├── bootstrap.php
+└── .htaccess

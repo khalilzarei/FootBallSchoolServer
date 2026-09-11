@@ -1,0 +1,154 @@
+const http = require('http');
+const crypto = require('crypto');
+const { Server } = require('socket.io');
+const mysql = require('mysql2/promise');
+
+const PORT = process.env.CHAT_PORT || 6001;
+const INTERNAL_SECRET = process.env.INTERNAL_SECRET || 'CHANGE_THIS_STRONG_SECRET';
+
+const pool = mysql.createPool({
+    host: process.env.DB_HOST || '127.0.0.1',
+    port: parseInt(process.env.DB_PORT || '3306', 10),
+    user: process.env.DB_USERNAME || 'root',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_DATABASE || 'football_school',
+    waitForConnections: true,
+    connectionLimit: 10,
+    timezone: 'Z',
+});
+
+const server = http.createServer((req, res) => {
+    if (req.url === '/health' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok' }));
+        return;
+    }
+
+    if (req.url === '/internal/broadcast' && req.method === 'POST') {
+        const secret = req.headers['x-internal-secret'];
+
+        if (secret !== INTERNAL_SECRET) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }));
+            return;
+        }
+
+        let body = '';
+
+        req.on('data', chunk => {
+            body += chunk;
+        });
+
+        req.on('end', () => {
+            try {
+                const payload = JSON.parse(body);
+
+                if (!payload.room_id || !payload.message) {
+                    res.writeHead(422, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, message: 'Invalid payload' }));
+                    return;
+                }
+
+                io.to(`room:${payload.room_id}`).emit('message:new', payload.message);
+
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true }));
+            } catch (e) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, message: 'Bad request' }));
+            }
+        });
+
+        return;
+    }
+
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, message: 'Not found' }));
+});
+
+const io = new Server(server, {
+    cors: {
+        origin: '*',
+    },
+});
+
+io.use(async (socket, next) => {
+    try {
+        const token = socket.handshake.auth && socket.handshake.auth.token
+            ? socket.handshake.auth.token
+            : null;
+
+        if (!token) {
+            return next(new Error('Unauthorized'));
+        }
+
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+        const [rows] = await pool.query(
+            `
+                SELECT u.id AS user_id, u.role
+                FROM football_user_tokens t
+                INNER JOIN football_users u ON u.id = t.user_id
+                WHERE t.token_hash = ?
+                  AND t.revoked_at IS NULL
+                  AND t.expires_at > NOW()
+                  AND u.status = 'active'
+                  AND u.deleted_at IS NULL
+                LIMIT 1
+            `,
+            [tokenHash]
+        );
+
+        if (!rows.length) {
+            return next(new Error('Unauthorized'));
+        }
+
+        socket.data.userId = rows[0].user_id;
+        socket.data.role = rows[0].role;
+
+        next();
+    } catch (e) {
+        next(new Error('Unauthorized'));
+    }
+});
+
+io.on('connection', async socket => {
+    const userId = socket.data.userId;
+
+    try {
+        const [rooms] = await pool.query(
+            `
+                SELECT chat_room_id
+                FROM football_chat_room_members
+                WHERE user_id = ?
+                  AND status = 'active'
+            `,
+            [userId]
+        );
+
+        rooms.forEach(room => {
+            socket.join(`room:${room.chat_room_id}`);
+        });
+    } catch (e) {
+        console.error('Error loading chat rooms:', e);
+    }
+
+    socket.on('typing', payload => {
+        if (!payload || !payload.room_id) {
+            return;
+        }
+
+        socket.to(`room:${payload.room_id}`).emit('typing', {
+            room_id: payload.room_id,
+            user_id: userId,
+        });
+    });
+
+    socket.on('disconnect', () => {
+        // No special cleanup required for now.
+    });
+});
+
+server.listen(PORT, () => {
+    console.log(`Chat service running on port ${PORT}`);
+});
