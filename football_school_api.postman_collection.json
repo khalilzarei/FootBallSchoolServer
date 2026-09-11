@@ -1,0 +1,196 @@
+{
+  "info": {
+    "name": "Football School API",
+    "description": "مجموعه کامل APIهای سامانه مدرسه فوتبال (شامل مدیریت آواتار)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://football.madahinote.ir", "type": "string" },
+    { "key": "token", "value": "", "type": "string" },
+    { "key": "user_id", "value": "1", "type": "string" },
+    { "key": "player_id", "value": "1", "type": "string" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "01 - Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.success && json.data && json.data.token) {",
+                  "    pm.collectionVariables.set('token', json.data.token);",
+                  "    if (json.data.user && json.data.user.id) pm.collectionVariables.set('user_id', json.data.user.id.toString());",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"identifier\": \"09120000000\",\n  \"password\": \"Admin@1234\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/auth/login", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "login"] }
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": { "method": "GET", "url": { "raw": "{{base_url}}/api/v1/auth/me", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "me"] } }
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"old_password\": \"Admin@1234\",\n  \"new_password\": \"NewAdmin@1234\",\n  \"new_password_confirmation\": \"NewAdmin@1234\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/auth/change-password", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "change-password"] }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": { "method": "POST", "url": { "raw": "{{base_url}}/api/v1/auth/logout", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "logout"] } }
+        }
+      ]
+    },
+    {
+      "name": "02 - Users",
+      "item": [
+        {
+          "name": "List Users",
+          "request": { "method": "GET", "url": { "raw": "{{base_url}}/api/v1/users?page=1&per_page=20", "host": ["{{base_url}}"], "path": ["api", "v1", "users"], "query": [{ "key": "page", "value": "1" }, { "key": "per_page", "value": "20" }] } }
+        },
+        {
+          "name": "Create User (with Avatar)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "full_name", "value": "علی محمدی", "type": "text" },
+                { "key": "mobile", "value": "09121234567", "type": "text" },
+                { "key": "role", "value": "coach", "type": "text" },
+                { "key": "status", "value": "active", "type": "text" },
+                { "key": "password", "value": "Password123", "type": "text" },
+                { "key": "avatar", "type": "file", "src": [], "description": "فایل عکس (اختیاری)" }
+              ]
+            },
+            "url": { "raw": "{{base_url}}/api/v1/users", "host": ["{{base_url}}"], "path": ["api", "v1", "users"] }
+          }
+        },
+        {
+          "name": "Update User (with Avatar)",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "full_name", "value": "علی محمدی ویرایش", "type": "text" },
+                { "key": "avatar", "type": "file", "src": [], "description": "فایل عکس جدید (اختیاری)" }
+              ]
+            },
+            "url": { "raw": "{{base_url}}/api/v1/users/{{user_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "users", "{{user_id}}"] }
+          }
+        },
+        {
+          "name": "Update User Avatar Only",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": { "mode": "formdata", "formdata": [{ "key": "avatar", "type": "file", "src": [] }] },
+            "url": { "raw": "{{base_url}}/api/v1/users/{{user_id}}/avatar", "host": ["{{base_url}}"], "path": ["api", "v1", "users", "{{user_id}}", "avatar"] }
+          }
+        },
+        {
+          "name": "Delete User Avatar",
+          "request": { "method": "DELETE", "url": { "raw": "{{base_url}}/api/v1/users/{{user_id}}/avatar", "host": ["{{base_url}}"], "path": ["api", "v1", "users", "{{user_id}}", "avatar"] } }
+        }
+      ]
+    },
+    {
+      "name": "04 - Players",
+      "item": [
+        {
+          "name": "List Players",
+          "request": { "method": "GET", "url": { "raw": "{{base_url}}/api/v1/players?page=1&per_page=20", "host": ["{{base_url}}"], "path": ["api", "v1", "players"], "query": [{ "key": "page", "value": "1" }, { "key": "per_page", "value": "20" }] } }
+        },
+        {
+          "name": "Create Player (with Avatar)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "first_name", "value": "محمد", "type": "text" },
+                { "key": "last_name", "value": "احمدی", "type": "text" },
+                { "key": "birth_date", "value": "2015-06-15", "type": "text" },
+                { "key": "gender", "value": "male", "type": "text" },
+                { "key": "status", "value": "active", "type": "text" },
+                { "key": "avatar", "type": "file", "src": [], "description": "فایل عکس (اختیاری)" }
+              ]
+            },
+            "url": { "raw": "{{base_url}}/api/v1/players", "host": ["{{base_url}}"], "path": ["api", "v1", "players"] }
+          }
+        },
+        {
+          "name": "Update Player (with Avatar)",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "first_name", "value": "محمد", "type": "text" },
+                { "key": "avatar", "type": "file", "src": [], "description": "فایل عکس جدید (اختیاری)" }
+              ]
+            },
+            "url": { "raw": "{{base_url}}/api/v1/players/{{player_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "players", "{{player_id}}"] }
+          }
+        },
+        {
+          "name": "Update Player Avatar Only",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": { "mode": "formdata", "formdata": [{ "key": "avatar", "type": "file", "src": [] }] },
+            "url": { "raw": "{{base_url}}/api/v1/players/{{player_id}}/avatar", "host": ["{{base_url}}"], "path": ["api", "v1", "players", "{{player_id}}", "avatar"] }
+          }
+        },
+        {
+          "name": "Delete Player Avatar",
+          "request": { "method": "DELETE", "url": { "raw": "{{base_url}}/api/v1/players/{{player_id}}/avatar", "host": ["{{base_url}}"], "path": ["api", "v1", "players", "{{player_id}}", "avatar"] } }
+        }
+      ]
+    },
+    {
+      "name": "24 - Client / Me",
+      "item": [
+        {
+          "name": "Update Own Avatar",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": { "mode": "formdata", "formdata": [{ "key": "avatar", "type": "file", "src": [] }] },
+            "url": { "raw": "{{base_url}}/api/v1/me/avatar", "host": ["{{base_url}}"], "path": ["api", "v1", "me", "avatar"] }
+          }
+        },
+        {
+          "name": "Delete Own Avatar",
+          "request": { "method": "DELETE", "url": { "raw": "{{base_url}}/api/v1/me/avatar", "host": ["{{base_url}}"], "path": ["api", "v1", "me", "avatar"] } }
+        }
+      ]
+    }
+  ]
+}
