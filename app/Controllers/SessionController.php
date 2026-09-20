@@ -119,8 +119,8 @@ class SessionController
 
         $errors = Validator::make($data, [
             'class_id' => 'required|integer',
-            'from_date' => 'required|date',
-            'to_date' => 'required|date',
+            'from_date' => 'date',
+            'to_date' => 'date',
         ]);
 
         if (!empty($errors)) {

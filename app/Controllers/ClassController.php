@@ -28,6 +28,7 @@ class ClassController
 
         $errors = Validator::make($data, [
             'title' => 'required|string|min:3|max:150',
+            'season_id' => 'integer',
             'age_group_id' => 'integer',
             'coach_id' => 'integer',
             'assistant_coach_id' => 'integer',
@@ -35,7 +36,7 @@ class ClassController
             'status' => 'string|in:active,inactive,archived',
             'location' => 'string|max:255',
             'description' => 'string|max:1000',
-            'pricing_type' => 'required|string|in:monthly,session,both',
+            'pricing_type' => 'string|in:monthly,session,both',
             'monthly_fee' => 'integer',
             'session_fee' => 'integer',
             'registration_fee' => 'integer',
@@ -121,6 +122,18 @@ class ClassController
         try {
             $class = ClassService::deactivate($id);
             Response::success('کلاس غیرفعال شد', ['class' => $class]);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
+    public function destroy(Request $request, array $params = []): void
+    {
+        $id = (int) ($params['id'] ?? 0);
+
+        try {
+            ClassService::delete($id);
+            Response::success('کلاس حذف شد');
         } catch (AppException $e) {
             Response::error($e->getMessage(), $e->getCode() ?: 400);
         }

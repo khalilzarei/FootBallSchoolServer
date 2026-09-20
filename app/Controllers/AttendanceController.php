@@ -23,6 +23,21 @@ class AttendanceController
         }
     }
 
+    /**
+     * برگه حضور و غیاب: بازیکنان ثبت‌نام‌شده کلاس + وضعیت ذخیره‌شده، در یک ریکوئست
+     */
+    public function sheet(Request $request, array $params = []): void
+    {
+        $sessionId = (int) ($params['id'] ?? 0);
+
+        try {
+            $result = AttendanceService::sheet($sessionId);
+            Response::success('برگه حضور و غیاب جلسه', $result);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
     public function saveBulk(Request $request, array $params = []): void
     {
         $sessionId = (int) ($params['id'] ?? 0);

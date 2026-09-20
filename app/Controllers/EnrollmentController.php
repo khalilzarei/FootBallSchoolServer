@@ -53,6 +53,22 @@ class EnrollmentController
         }
     }
 
+    /**
+     * ثبت‌نام گروهی: همه بازیکنان فعالِ گروه سنیِ کلاس
+     * POST /api/v1/classes/{id}/enroll-age-group
+     */
+    public function enrollAgeGroup(Request $request, array $params = []): void
+    {
+        $classId = (int) ($params['id'] ?? 0);
+
+        try {
+            $result = EnrollmentService::enrollAgeGroup($classId);
+            Response::success('ثبت‌نام گروهی انجام شد', $result);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
     public function show(Request $request, array $params = []): void
     {
         $enrollmentId = (int) ($params['id'] ?? 0);
@@ -104,7 +120,6 @@ class EnrollmentController
             Response::error($e->getMessage(), $e->getCode() ?: 400);
         }
     }
-
     public function deactivate(Request $request, array $params = []): void
     {
         $enrollmentId = (int) ($params['id'] ?? 0);

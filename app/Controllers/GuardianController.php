@@ -63,8 +63,8 @@ class GuardianController
         $id = (int) ($params['id'] ?? 0);
 
         try {
-            $players = GuardianService::players($id);
-            Response::success('لیست بازیکنان سرپرست', ['players' => $players]);
+            // اپ لیست مستقیم می‌خواند (مطابق قرارداد guardians بازیکن)
+            Response::success('لیست بازیکنان سرپرست', GuardianService::players($id));
         } catch (AppException $e) {
             Response::error($e->getMessage(), $e->getCode() ?: 400);
         }

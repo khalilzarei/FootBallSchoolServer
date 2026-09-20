@@ -87,7 +87,7 @@ class PlayerController
     public function guardians(Request $request, array $params = []): void
     {
         try {
-            Response::success('لیست سرپرست‌های بازیکن', ['guardians' => PlayerService::guardians((int) ($params['id'] ?? 0))]);
+            Response::success('لیست سرپرست‌های بازیکن', PlayerService::guardians((int) ($params['id'] ?? 0)));
         } catch (AppException $e) {
             Response::error($e->getMessage(), $e->getCode() ?: 400);
         }
@@ -98,7 +98,7 @@ class PlayerController
         $playerId = (int) ($params['id'] ?? 0);
         $errors = Validator::make($request->input(), [
             'guardian_id' => 'required|integer',
-            'relation' => 'string|in:father,mother,grandfather,grandmother,guardian,other',
+            'relation' => 'string|in:father,mother,grandfather,grandmother,uncle,aunt,guardian,other',
             'is_primary' => 'boolean',
             'can_view_reports' => 'boolean',
             'can_pay' => 'boolean',
@@ -118,6 +118,54 @@ class PlayerController
         $guardianId = (int) ($params['guardian_id'] ?? 0);
         try {
             Response::success('ارتباط بازیکن و سرپرست قطع شد', PlayerService::detachGuardian($playerId, $guardianId));
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
+    /**
+     * ساخت سرپرست جدید (با موبایل) + اتصال به بازیکن در یک ریکوئست
+     */
+    public function attachNewGuardian(Request $request, array $params = []): void
+    {
+        $playerId = (int) ($params['id'] ?? 0);
+        $errors = Validator::make($request->input(), [
+            'full_name' => 'required|string|min:2|max:100',
+            'mobile' => 'required|string|min:10|max:15',
+            'national_code' => 'digits:10',
+            'relation' => 'string|in:father,mother,grandfather,grandmother,uncle,aunt,guardian,other',
+            'is_primary' => 'boolean',
+            'can_view_reports' => 'boolean',
+            'can_pay' => 'boolean',
+        ]);
+        if (!empty($errors)) Response::error('اطلاعات ورودی معتبر نیست', 422, $errors);
+
+        try {
+            Response::success('سرپرست جدید ساخته و به بازیکن متصل شد', PlayerService::attachNewGuardian($playerId, $request->input()));
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
+    /**
+     * ویرایش سرپرستِ متصل به بازیکن (نام/موبایل/کد ملی/نسبت/دسترسی‌ها)
+     */
+    public function updateGuardian(Request $request, array $params = []): void
+    {
+        $playerId = (int) ($params['id'] ?? 0);
+        $guardianId = (int) ($params['guardian_id'] ?? 0);
+        $errors = Validator::make($request->input(), [
+            'full_name' => 'string|min:2|max:100',
+            'mobile' => 'string|min:10|max:15',
+            'national_code' => 'digits:10',
+            'relation' => 'string|in:father,mother,grandfather,grandmother,uncle,aunt,guardian,other',
+            'can_view_reports' => 'boolean',
+            'can_pay' => 'boolean',
+        ]);
+        if (!empty($errors)) Response::error('اطلاعات ورودی معتبر نیست', 422, $errors);
+
+        try {
+            Response::success('اطلاعات سرپرست به‌روزرسانی شد', PlayerService::updateGuardian($playerId, $guardianId, $request->input()));
         } catch (AppException $e) {
             Response::error($e->getMessage(), $e->getCode() ?: 400);
         }

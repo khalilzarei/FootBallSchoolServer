@@ -27,10 +27,13 @@ class ChatController
         $data = $request->input();
 
         $errors = Validator::make($data, [
-            'room_type' => 'required|string|in:guardian_admin,coach_admin,guardian_coach',
-            'target_user_id' => 'required|integer',
+            // اختیاری — اگر ارسال نشود سرور از نقش دو کاربر استنتاج می‌کند
+            'room_type' => 'string|in:player_admin,coach_admin,player_coach,age_group',
+            // برای اتاق دو نفره الزامی است؛ برای گفتگوی گروهی گروه سنی ارسال نمی‌شود
+            'target_user_id' => 'integer',
             'player_id' => 'integer',
             'class_id' => 'integer',
+            'age_group_id' => 'integer',
             'subject' => 'string|max:255',
         ]);
 
@@ -111,6 +114,32 @@ class ChatController
         try {
             $result = ChatService::read($roomId, $data);
             Response::success('پیام‌ها خوانده شدند', $result);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
+    /** قفل کردن گفتگو (فقط ادمین) — کاربران دیگر نمی‌توانند پیام بفرستند */
+    public function lockRoom(Request $request, array $params = []): void
+    {
+        $roomId = (int) ($params['id'] ?? 0);
+
+        try {
+            $room = ChatService::setRoomLocked($roomId, true);
+            Response::success('گفتگو قفل شد', ['room' => $room]);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
+    /** باز کردن گفتگوی قفل‌شده (فقط ادمین) */
+    public function unlockRoom(Request $request, array $params = []): void
+    {
+        $roomId = (int) ($params['id'] ?? 0);
+
+        try {
+            $room = ChatService::setRoomLocked($roomId, false);
+            Response::success('گفتگو باز شد', ['room' => $room]);
         } catch (AppException $e) {
             Response::error($e->getMessage(), $e->getCode() ?: 400);
         }

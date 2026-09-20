@@ -60,4 +60,37 @@ class ClientController
             Response::error($e->getMessage(), $e->getCode() ?: 400);
         }
     }
+
+    /** کلاس‌های فعال فرزندان (با مربی و برنامه هفتگی) */
+    public function classes(Request $request, array $params = []): void
+    {
+        try {
+            $classes = ClientService::classes();
+            Response::success('کلاس‌های فرزندان', ['classes' => $classes]);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
+    /** مسابقات مرتبط با فرزندان */
+    public function matches(Request $request, array $params = []): void
+    {
+        try {
+            $matches = ClientService::matches();
+            Response::success('مسابقات فرزندان', ['matches' => $matches]);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
+    /** مخاطبین قابل گفتگو (ادمین‌ها + مربیان کلاس‌های فرزندان) */
+    public function chatContacts(Request $request, array $params = []): void
+    {
+        try {
+            $contacts = ClientService::chatContacts();
+            Response::success('مخاطبین گفتگو', ['contacts' => $contacts]);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
 }

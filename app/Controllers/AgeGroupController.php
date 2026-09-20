@@ -27,7 +27,6 @@ class AgeGroupController
         $data = $request->input();
 
         $errors = Validator::make($data, [
-            'season_id' => 'required|integer',
             'title' => 'required|string|min:3|max:100',
             'birth_date_from' => 'required|date',
             'birth_date_to' => 'required|date',
@@ -61,6 +60,21 @@ class AgeGroupController
         }
     }
 
+    /**
+     * بازیکنان عضو گروه سنی (هر بازیکنی که تاریخ تولدش در بازه گروه باشد)
+     */
+    public function players(Request $request, array $params = []): void
+    {
+        $id = (int) ($params['id'] ?? 0);
+
+        try {
+            $players = AgeGroupService::players($id);
+            Response::success('بازیکنان گروه سنی', ['players' => $players]);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
     public function update(Request $request, array $params = []): void
     {
         $id = (int) ($params['id'] ?? 0);
@@ -68,7 +82,6 @@ class AgeGroupController
         $data = $request->input();
 
         $errors = Validator::make($data, [
-            'season_id' => 'integer',
             'title' => 'string|min:3|max:100',
             'birth_date_from' => 'date',
             'birth_date_to' => 'date',
