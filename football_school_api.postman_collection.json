@@ -1,25 +1,63 @@
 {
   "info": {
     "name": "Football School API",
-    "description": "مجموعه کامل APIهای سامانه مدرسه فوتبال (شامل مدیریت آواتار)",
+    "description": "مدرسه فوتبال — کالکشن API (به‌روز برای معماری «لاگین بازیکن»)\n\n▪ ورود بازیکن: identifier = کد ملی بازیکن، رمز اولیه = کد ملی (در اولین ورود اجباراً عوض می‌شود)\n▪ سرپرست حساب کاربری ندارد — فقط رکورد تماس برای هر بازیکن\n▪ پاکت همه‌ی پاسخ‌ها: {\"success\": bool, \"message\": string, \"data\": ...}\n▪ احراز هویت: Bearer Token (ابتدا Login را اجرا کن — توکن خودکار در متغیر token ذخیره می‌شود)\n▪ بخش‌های ۰۲ و ۰۳ مخصوص اپ بازیکن/والدین هستند (me/* و chat/*)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "base_url", "value": "https://football.madahinote.ir", "type": "string" },
-    { "key": "token", "value": "", "type": "string" },
-    { "key": "user_id", "value": "1", "type": "string" },
-    { "key": "player_id", "value": "1", "type": "string" }
+    {
+      "key": "base_url",
+      "value": "https://football.madahinote.ir",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "player_id",
+      "value": "5",
+      "type": "string"
+    },
+    {
+      "key": "guardian_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "room_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "target_user_id",
+      "value": "3",
+      "type": "string"
+    }
   ],
   "auth": {
     "type": "bearer",
-    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
   },
   "item": [
     {
       "name": "01 - Auth",
+      "description": "ورود و خروج. برای اپ بازیکن: identifier = کد ملی بازیکن؛ رمز اولیه = کد ملی (must_change_password=1 → اجبار تغییر رمز).",
       "item": [
         {
-          "name": "Login",
+          "name": "Login (ورود)",
           "event": [
             {
               "listen": "test",
@@ -36,159 +74,978 @@
             }
           ],
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"identifier\": \"09120000000\",\n  \"password\": \"Admin@1234\"\n}" },
-            "url": { "raw": "{{base_url}}/api/v1/auth/login", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "login"] }
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"2361041441\",\n  \"password\": \"2361041441\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "ورود — برای بازیکن: identifier = کد ملی بازیکن و password = رمز بازیکن (رمز اولیه = کد ملی؛ بعد از اولین ورود اجباراً عوض می‌شود).\nبرای ادمین/مربی: identifier = موبایل یا کد ملی.\n\nاگر must_change_password = 1 بود، اپ باید صفحه تغییر رمز را اجباری نشان دهد.\n\nخطاها: 401 نام کاربری یا رمز عبور اشتباه است | 403 حساب کاربری فعال نیست | 422 اطلاعات ورودی معتبر نیست.\n\nنمونه پاسخ:\n```\n{\n  \"success\": true,\n  \"message\": \"ورود موفق\",\n  \"data\": {\n    \"token\": \"a1b2c3...\",\n    \"token_type\": \"Bearer\",\n    \"expires_at\": \"2026-10-19 14:00:00\",\n    \"user\": {\n      \"id\": 8,\n      \"full_name\": \"علی عباسی\",\n      \"mobile\": null,\n      \"national_code\": \"2361041441\",\n      \"role\": \"player\",\n      \"status\": \"active\",\n      \"must_change_password\": 1,\n      \"last_login_at\": null,\n      \"created_at\": \"2026-09-18 12:00:00\"\n    }\n  }\n}\n```\n(توکن به‌صورت خودکار در متغیر token ذخیره می‌شود)"
           }
         },
         {
-          "name": "Get Current User",
-          "request": { "method": "GET", "url": { "raw": "{{base_url}}/api/v1/auth/me", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "me"] } }
+          "name": "Get Current User (من)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "کاربر جاری بر اساس توکن.\n\nنمونه پاسخ: data.user — همان شکل user در login (بدون password_hash):\n```\n{ \"success\": true, \"message\": \"اطلاعات کاربر فعلی\", \"data\": { \"user\": { \"id\": 8, \"full_name\": \"علی عباسی\", \"mobile\": null, \"national_code\": \"2361041441\", \"role\": \"player\", \"status\": \"active\", \"must_change_password\": 0, \"avatar_path\": \"\" } } }\n```"
+          }
         },
         {
-          "name": "Change Password",
+          "name": "Change Password (تغییر رمز)",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"old_password\": \"Admin@1234\",\n  \"new_password\": \"NewAdmin@1234\",\n  \"new_password_confirmation\": \"NewAdmin@1234\"\n}" },
-            "url": { "raw": "{{base_url}}/api/v1/auth/change-password", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "change-password"] }
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/change-password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "change-password"
+              ]
+            },
+            "description": "تغییر رمز — old_password (رمز فعلی) + new_password (حداقل ۸ کاراکتر، متفاوت از فعلی) + new_password_confirmation.\nبعد از تغییر، همه‌ی توکن‌های دیگر این کاربر باطل می‌شوند (فقط همین توکن می‌ماند).\n\nخطاها: 400 رمز عبور فعلی اشتباه است | 422 اعتبارسنجی.\n\nنمونه پاسخ: { \"success\": true, \"message\": \"رمز عبور با موفقیت تغییر کرد\", \"data\": null }",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"old_password\": \"2361041441\",\n  \"new_password\": \"NewPass1234\",\n  \"new_password_confirmation\": \"NewPass1234\"\n}"
+            }
           }
         },
         {
-          "name": "Logout",
-          "request": { "method": "POST", "url": { "raw": "{{base_url}}/api/v1/auth/logout", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "logout"] } }
+          "name": "Logout (خروج)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/logout",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "خروج — توکن جاری باطل می‌شود.\n\nنمونه پاسخ: { \"success\": true, \"message\": \"خروج موفق\", \"data\": null }"
+          }
         }
       ]
     },
     {
-      "name": "02 - Users",
+      "name": "02 - Client / Me (اپ بازیکن)",
+      "description": "همه‌ی داده‌های اپ بازیکن/والدین — فقط همین endpointها + چت. هیچ endpoint ادمینی از اپ بازیکن صدا زده نشود (همه 403 می‌دهند).",
       "item": [
         {
-          "name": "List Users",
-          "request": { "method": "GET", "url": { "raw": "{{base_url}}/api/v1/users?page=1&per_page=20", "host": ["{{base_url}}"], "path": ["api", "v1", "users"], "query": [{ "key": "page", "value": "1" }, { "key": "per_page", "value": "20" }] } }
+          "name": "me/children (بازیکن من)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/children",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "children"
+              ]
+            },
+            "description": "اطلاعات بازیکنِ حساب جاری — همیشه آرایه (برای نقش player: ۰ یا ۱ عضو؛ برای ادمین: خالی).\n\n```\n{\n  \"success\": true,\n  \"message\": \"لیست فرزندان\",\n  \"data\": {\n    \"children\": [\n      {\n        \"id\": 5,\n        \"first_name\": \"علی\",\n        \"last_name\": \"عباسی\",\n        \"full_name\": \"علی عباسی\",\n        \"birth_date\": \"2015-04-10\",\n        \"age\": 10,\n        \"gender\": \"male\",\n        \"national_code\": \"2361041441\",\n        \"avatar_url\": \"https://football.madahinote.ir/storage/avatars/...\",\n        \"current_class\": {\n          \"id\": 2, \"title\": \"کلاس زیر ۱۰ سال\", \"season_id\": null, \"age_group_id\": 3,\n          \"coach_id\": 7, \"assistant_coach_id\": null, \"capacity\": 20, \"enrolled_count\": 14, \"status\": \"active\"\n        },\n        \"balance\": { \"player_id\": 5, \"debt\": 2000000, \"total_paid\": 3000000, \"pending_payments_count\": 1 }\n      }\n    ]\n  }\n}\n```\n(current_class و balance ممکن است null باشند — هنوز ثبت‌نام/فاکتور ندارد)"
+          }
         },
         {
-          "name": "Create User (with Avatar)",
+          "name": "me/schedule (برنامه جلسات)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/schedule",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "schedule"
+              ]
+            },
+            "description": "جلسات کلاس‌های فعال — پنجره: ۱۴ روز گذشته تا آینده؛ وضعیت‌ها: scheduled | makeup | completed.\n\n```\n{ \"data\": { \"sessions\": [\n  { \"id\": 11, \"class_id\": 2, \"class_title\": \"کلاس زیر ۱۰ سال\", \"session_date\": \"2026-09-20\",\n    \"start_time\": \"17:00:00\", \"end_time\": \"18:30:00\", \"location\": \"زمین ۱\",\n    \"topic\": null, \"status\": \"scheduled\", \"notes\": null, \"created_at\": \"...\" }\n] } }\n```\n(ساعت‌ها \"HH:MM:SS\" — در UI فقط ۵ کاراکتر اول. فیلدها را nullable تعریف کن)"
+          }
+        },
+        {
+          "name": "me/news (اخبار)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/news",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "news"
+              ]
+            },
+            "description": "اخبار منتشرشده‌ی مجاز برای این کاربر (مخاطب: همه/نقش(player)/کلاس/گروه سنی/بازیکن).\n\n```\n{ \"data\": { \"news\": [\n  { \"id\": 3, \"title\": \"جلسه فردا لغو شد\", \"body\": \"...\", \"status\": \"published\",\n    \"publish_at\": \"2026-09-18 08:00:00\", \"created_at\": \"...\", \"updated_at\": \"...\" }\n] } }\n```"
+          }
+        },
+        {
+          "name": "me/media (رسانه‌ها)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/media",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "media"
+              ]
+            },
+            "description": "رسانه‌های قابل مشاهده (public + مخاطب‌محور class/age_group/players). اپ بازیکن از این endpoint استفاده نمی‌کند.\n\n```\n{ \"data\": { \"media\": [ { \"id\": 9, \"file_name\": \"...\", \"original_name\": \"...\", \"file_type\": \"image\", \"file_size\": 102400, \"mime_type\": \"image/jpeg\", \"visibility\": \"class\", \"status\": \"active\", \"created_at\": \"...\" } ] } }\n```\n(URL مستقیم در خروجی نیست — دانلود: GET media/{id}/download با توکن)"
+          }
+        },
+        {
+          "name": "me/classes (کلاس‌های بازیکن)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/classes",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "classes"
+              ]
+            },
+            "description": "کلاس‌های فعالِ ثبت‌نام‌شده‌ی بازیکن با مربی و برنامه هفتگی.\n\n```\n{\n  \"data\": { \"classes\": [\n    {\n      \"id\": 2, \"title\": \"کلاس زیر ۱۰ سال\", \"age_group_title\": \"زیر ۱۰ سال\",\n      \"coach_name\": \"مربی رضا\", \"assistant_coach_name\": null,\n      \"location\": \"زمین ۱\", \"description\": null, \"capacity\": 20, \"enrolled_count\": 14,\n      \"schedules\": [\n        { \"weekday\": 1, \"weekday_label\": \"شنبه\", \"start_time\": \"17:00\", \"end_time\": \"18:30\", \"location\": \"زمین ۱\" }\n      ]\n    }\n  ] }\n}\n```\n(schedules ممکن است خالی باشد؛ ساعت‌ها از قبل \"HH:MM\" هستند. weekday: ۱=شنبه ... ۷=جمعه)"
+          }
+        },
+        {
+          "name": "me/finance (صورت حساب)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/finance",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "finance"
+              ]
+            },
+            "description": "وضعیت مالی بازیکن + فاکتورهای فعال (بدون draft/cancelled). مبالغ تومان.\n\n```\n{\n  \"data\": { \"finance\": [\n    {\n      \"player_id\": 5, \"player_name\": \"علی عباسی\",\n      \"total_invoiced\": 5000000, \"total_paid\": 3000000, \"balance\": 2000000,\n      \"pending_payments\": 1, \"pending_amount\": 500000,\n      \"invoices\": [\n        { \"id\": 10, \"invoice_number\": \"INV-0010\", \"invoice_type\": \"monthly\",\n          \"period_start_date\": \"2026-09-01\", \"period_end_date\": \"2026-09-30\",\n          \"due_date\": \"2026-09-10\", \"status\": \"partial\",\n          \"total_amount\": 2000000, \"paid_amount\": 1000000, \"remaining_amount\": 1000000 }\n      ]\n    }\n  ] }\n}\n```"
+          }
+        },
+        {
+          "name": "me/matches (مسابقات)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/matches",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "matches"
+              ]
+            },
+            "description": "مسابقات کلاس/گروه سنی بازیکن + مسابقه‌هایی که در ترکیب آنهاست — جدیدترین اول.\n\n```\n{ \"data\": { \"matches\": [\n  { \"id\": 3, \"title\": \"دوستانه با تیم پارس\", \"match_type\": \"friendly\",\n    \"class_id\": 2, \"age_group_id\": 3, \"opponent_team\": \"تیم پارس\",\n    \"match_date\": \"2026-09-25\", \"match_time\": \"16:30:00\", \"location\": \"زمین اصلی\",\n    \"status\": \"planned\", \"home_score\": null, \"away_score\": null, \"notes\": null,\n    \"class_title\": \"کلاس زیر ۱۰ سال\", \"age_group_title\": \"زیر ۱۰ سال\" }\n] } }\n```\n(status: planned | completed | cancelled ...؛ نتیجه فقط وقتی completed پر است)"
+          }
+        },
+        {
+          "name": "me/chat-contacts (مخاطبین چت)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/chat-contacts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "chat-contacts"
+              ]
+            },
+            "description": "مخاطبین قابل گفتگو: ادمین‌های فعال + مربیان اصلی/کمکی کلاس‌های فعال بازیکن.\n\n```\n{ \"data\": { \"contacts\": [\n  { \"user_id\": 3, \"full_name\": \"مدیر مدرسه\", \"role\": \"admin\", \"avatar_url\": \"https://...\", \"class_title\": null },\n  { \"user_id\": 12, \"full_name\": \"مربی رضا\", \"role\": \"coach\", \"avatar_url\": \"https://...\", \"class_title\": \"کلاس زیر ۱۰ سال\" }\n] } }\n```"
+          }
+        },
+        {
+          "name": "me/avatar (آپلود عکس پروفایل)",
           "request": {
             "method": "POST",
-            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/avatar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "avatar"
+              ]
+            },
+            "description": "آپلود عکس پروفایل حساب جاری — multipart، نام فیلد \"avatar\".\n\nنمونه پاسخ: { \"success\": true, \"message\": \"آواتار شما به‌روزرسانی شد\", \"data\": { \"user\": { ... } } }",
             "body": {
               "mode": "formdata",
               "formdata": [
-                { "key": "full_name", "value": "علی محمدی", "type": "text" },
-                { "key": "mobile", "value": "09121234567", "type": "text" },
-                { "key": "role", "value": "coach", "type": "text" },
-                { "key": "status", "value": "active", "type": "text" },
-                { "key": "password", "value": "Password123", "type": "text" },
-                { "key": "avatar", "type": "file", "src": [], "description": "فایل عکس (اختیاری)" }
+                {
+                  "key": "avatar",
+                  "type": "file",
+                  "src": [],
+                  "description": "فایل عکس (اختیاری)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "me/avatar (حذف عکس پروفایل)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/avatar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "avatar"
               ]
             },
-            "url": { "raw": "{{base_url}}/api/v1/users", "host": ["{{base_url}}"], "path": ["api", "v1", "users"] }
+            "description": "حذف عکس پروفایل حساب جاری.\n\nنمونه پاسخ: { \"success\": true, \"message\": \"آواتار شما حذف شد\", \"data\": { \"user\": { ... } } }"
           }
-        },
-        {
-          "name": "Update User (with Avatar)",
-          "request": {
-            "method": "PUT",
-            "header": [],
-            "body": {
-              "mode": "formdata",
-              "formdata": [
-                { "key": "full_name", "value": "علی محمدی ویرایش", "type": "text" },
-                { "key": "avatar", "type": "file", "src": [], "description": "فایل عکس جدید (اختیاری)" }
-              ]
-            },
-            "url": { "raw": "{{base_url}}/api/v1/users/{{user_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "users", "{{user_id}}"] }
-          }
-        },
-        {
-          "name": "Update User Avatar Only",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "body": { "mode": "formdata", "formdata": [{ "key": "avatar", "type": "file", "src": [] }] },
-            "url": { "raw": "{{base_url}}/api/v1/users/{{user_id}}/avatar", "host": ["{{base_url}}"], "path": ["api", "v1", "users", "{{user_id}}", "avatar"] }
-          }
-        },
-        {
-          "name": "Delete User Avatar",
-          "request": { "method": "DELETE", "url": { "raw": "{{base_url}}/api/v1/users/{{user_id}}/avatar", "host": ["{{base_url}}"], "path": ["api", "v1", "users", "{{user_id}}", "avatar"] } }
         }
       ]
     },
     {
-      "name": "04 - Players",
+      "name": "03 - Chat",
+      "description": "گفتگوها — برای اپ بازیکن: ساخت اتاق فقط با target_user_id (بدون room_type).",
+      "item": [
+        {
+          "name": "chat/rooms (لیست اتاق‌ها)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/rooms",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "chat",
+                "rooms"
+              ]
+            },
+            "description": "اتاق‌های چت کاربر جاری — دو نفره + گروهی گروه‌های سنی (عضویت خودکار).\n\nroom_type: player_admin | coach_admin | player_coach | age_group\n\n```\n{\n  \"data\": { \"rooms\": [\n    {\n      \"id\": 7, \"room_type\": \"player_coach\",\n      \"target_user_id\": 12, \"target_user_name\": \"مربی رضا\", \"target_user_role\": \"coach\",\n      \"player_id\": 5, \"class_id\": null, \"subject\": null,\n      \"age_group_id\": null, \"age_group_title\": null,\n      \"is_locked\": false, \"member_count\": 2,\n      \"members\": [ { \"user_id\": 8, \"full_name\": \"علی عباسی\", \"role\": \"player\", \"member_role\": \"member\", \"last_read_message_id\": 456 } ],\n      \"last_message\": { \"id\": 457, \"room_id\": 7, \"sender_id\": 12, \"sender\": { \"id\": 12, \"full_name\": \"مربی رضا\", \"role\": \"coach\", \"status\": \"active\" }, \"message_type\": \"text\", \"body\": \"سلام\", \"media_id\": null, \"media\": null, \"is_read\": false, \"read_at\": null, \"sent_at\": \"...\", \"created_at\": \"...\" },\n      \"unread_count\": 2, \"status\": \"active\", \"created_at\": \"...\", \"updated_at\": \"...\"\n    }\n  ] }\n}\n```\n(در age_group: target_user_id=null و target_user_name=عنوان گروه سنی)"
+          }
+        },
+        {
+          "name": "chat/rooms (ساخت اتاق دو نفره)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/rooms",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "chat",
+                "rooms"
+              ]
+            },
+            "description": "ساخت یا دریافت اتاق دو نفره (idempotent — اتاق موجود با unique_key برمی‌گردد).\nبدنه فقط {target_user_id} کافی است؛ room_type را نفرست (سرور از نقش دو کاربر استنتاج می‌کند: بازیکن↔ادمین → player_admin، بازیکن↔مربی → player_coach، مربی↔ادمین → coach_admin).\nplayer_id اختیاری (اتاق درباره‌ی یک بازیکن).\nاتاق گروهی گروه سنی فقط ادمین می‌سازد: {\"room_type\":\"age_group\",\"age_group_id\":N}.\n\nخطاها: 403 نقش کاربران برای این چت معتبر نیست / این مربی به کلاس‌های فعال این بازیکن مرتبط نیست.\n\nنمونه پاسخ (201): { \"data\": { \"room\": { ...همان شکل اتاق بالا... } } }",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target_user_id\": 12\n}"
+            }
+          }
+        },
+        {
+          "name": "chat/rooms/{id} (جزئیات اتاق)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/rooms/{{room_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "chat",
+                "rooms",
+                "{{room_id}}"
+              ]
+            },
+            "description": "جزئیات یک اتاق — همان شکل room. برای اتاق گروهی گروه سنی، اگر کاربر واجد شرایط باشد و عضو نباشد خودکار عضو می‌شود."
+          }
+        },
+        {
+          "name": "chat/rooms/{id}/messages (پیام‌ها)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/rooms/{{room_id}}/messages?limit=50",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "chat",
+                "rooms",
+                "{{room_id}}",
+                "messages"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "پیام‌های اتاق — ترتیب صعودی (قدیمی → جدید). query اختیاری: limit (۱ تا ۱۰۰، پیش‌فرض ۵۰).\n\n```\n{ \"data\": { \"messages\": [\n  { \"id\": 457, \"room_id\": 7, \"sender_id\": 12,\n    \"sender\": { \"id\": 12, \"full_name\": \"مربی رضا\", \"role\": \"coach\", \"status\": \"active\" },\n    \"message_type\": \"text\", \"body\": \"سلام\", \"media_id\": null, \"media\": null,\n    \"is_read\": false, \"read_at\": null, \"sent_at\": \"...\", \"created_at\": \"2026-09-19 15:00:00\" }\n] } }\n```\n(is_read نسبت به last_read کاربر جاری محاسبه می‌شود)"
+          }
+        },
+        {
+          "name": "chat/rooms/{id}/messages (ارسال پیام)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/rooms/{{room_id}}/messages",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "chat",
+                "rooms",
+                "{{room_id}}",
+                "messages"
+              ]
+            },
+            "description": "ارسال پیام — message_type یکی از text | image | video | file | system (پیش‌فرض text). برای text بدنه نمی‌تواند خالی باشد.\nاگر اتاق قفل باشد و نقش شما admin نباشد → 403 «این گفتگو توسط مدیر قفل شده است».\n\nنمونه پاسخ (201): { \"data\": { \"message\": { ...همان شکل پیام بالا... } } }",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message_type\": \"text\",\n  \"body\": \"سلام\"\n}"
+            }
+          }
+        },
+        {
+          "name": "chat/rooms/{id}/read (خواندن)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/rooms/{{room_id}}/read",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "chat",
+                "rooms",
+                "{{room_id}}",
+                "read"
+              ]
+            },
+            "description": "علامت‌گذاری خوانده‌شده تا آخرین پیام — last_read_message_id = شناسه آخرین پیام دریافتی.\n\nنمونه پاسخ: { \"data\": { \"room_id\": 7, \"last_read_message_id\": 457 } }",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"last_read_message_id\": 457\n}"
+            }
+          }
+        },
+        {
+          "name": "chat/rooms/{id}/lock (قفل — ادمین)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/rooms/{{room_id}}/lock",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "chat",
+                "rooms",
+                "{{room_id}}",
+                "lock"
+              ]
+            },
+            "description": "قفل کردن گفتگو (فقط ادمین) — کاربران دیگر نمی‌توانند پیام بفرستند.\n\nنمونه پاسخ: { \"data\": { \"room\": { ... } } }"
+          }
+        },
+        {
+          "name": "chat/rooms/{id}/unlock (باز کردن — ادمین)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/rooms/{{room_id}}/unlock",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "chat",
+                "rooms",
+                "{{room_id}}",
+                "unlock"
+              ]
+            },
+            "description": "باز کردن گفتگوی قفل‌شده (فقط ادمین)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 - Players (ادمین)",
+      "description": "مدیریت بازیکنان — ثبت بازیکن با کد ملی = ساخت خودکار حساب ورود بازیکن (رمز اولیه = کد ملی).",
       "item": [
         {
           "name": "List Players",
-          "request": { "method": "GET", "url": { "raw": "{{base_url}}/api/v1/players?page=1&per_page=20", "host": ["{{base_url}}"], "path": ["api", "v1", "players"], "query": [{ "key": "page", "value": "1" }, { "key": "per_page", "value": "20" }] } }
-        },
-        {
-          "name": "Create Player (with Avatar)",
           "request": {
-            "method": "POST",
-            "header": [],
-            "body": {
-              "mode": "formdata",
-              "formdata": [
-                { "key": "first_name", "value": "محمد", "type": "text" },
-                { "key": "last_name", "value": "احمدی", "type": "text" },
-                { "key": "birth_date", "value": "2015-06-15", "type": "text" },
-                { "key": "gender", "value": "male", "type": "text" },
-                { "key": "status", "value": "active", "type": "text" },
-                { "key": "avatar", "type": "file", "src": [], "description": "فایل عکس (اختیاری)" }
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players?page=1&per_page=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "players"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "20"
+                }
               ]
             },
-            "url": { "raw": "{{base_url}}/api/v1/players", "host": ["{{base_url}}"], "path": ["api", "v1", "players"] }
+            "description": "لیست بازیکنان (ادمین). query: page, per_page, status, q.\n\nنمونه پاسخ: { \"data\": { \"items\": [ { ...player... } ], \"total\": 25, \"page\": 1, \"per_page\": 20 } }"
           }
         },
         {
-          "name": "Update Player (with Avatar)",
+          "name": "Create Player (با کد ملی → حساب ورود)",
           "request": {
-            "method": "PUT",
-            "header": [],
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "players"
+              ]
+            },
+            "description": "ثبت بازیکن (ادمین) — multipart.\n\n⚠ national_code را حتماً بفرست: با کد ملی، حساب ورود بازیکن (نقش player) خودکار ساخته می‌شود — شناسه ورود و رمز اولیه = کد ملی (must_change_password=1). بدون کد ملی، بازیکن حساب ورود ندارد.\n\nنمونه پاسخ (201): data.player = ردیف بازیکن + user_id (حساب ورود؛ null = بدون حساب) + guardians[] + current_class + avatar_url (بدون password_hash).",
             "body": {
               "mode": "formdata",
               "formdata": [
-                { "key": "first_name", "value": "محمد", "type": "text" },
-                { "key": "avatar", "type": "file", "src": [], "description": "فایل عکس جدید (اختیاری)" }
+                {
+                  "key": "first_name",
+                  "value": "محمد",
+                  "type": "text"
+                },
+                {
+                  "key": "last_name",
+                  "value": "احمدی",
+                  "type": "text"
+                },
+                {
+                  "key": "birth_date",
+                  "value": "2015-06-15",
+                  "type": "text"
+                },
+                {
+                  "key": "gender",
+                  "value": "male",
+                  "type": "text"
+                },
+                {
+                  "key": "national_code",
+                  "value": "1234567890",
+                  "type": "text"
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "type": "text"
+                },
+                {
+                  "key": "medical_notes",
+                  "value": "",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "value": "",
+                  "type": "text"
+                },
+                {
+                  "key": "avatar",
+                  "type": "file",
+                  "src": [],
+                  "description": "فایل عکس (اختیاری)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Player",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/{{player_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "players",
+                "{{player_id}}"
               ]
             },
-            "url": { "raw": "{{base_url}}/api/v1/players/{{player_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "players", "{{player_id}}"] }
+            "description": "جزئیات بازیکن (ادمین) — data.player: تمام فیلدها + user_id + guardians[] + current_class + avatar_url."
+          }
+        },
+        {
+          "name": "Update Player",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/{{player_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "players",
+                "{{player_id}}"
+              ]
+            },
+            "description": "ویرایش بازیکن (ادمین) — multipart؛ فقط فیلدهای ارسالی تغییر می‌کنند.\n\nتغییر national_code: شناسه ورود حساب همگام می‌شود؛ اگر قبلاً حساب نداشت با کد ملی جدید ساخته می‌شود (رمز اولیه = کد ملی). حذف کد ملی (مقدار خالی) → شناسه ورود و رمز برداشته می‌شوند (ورود غیرممکن می‌شود).",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "first_name",
+                  "value": "محمد",
+                  "type": "text"
+                },
+                {
+                  "key": "national_code",
+                  "value": "1234567890",
+                  "type": "text"
+                },
+                {
+                  "key": "avatar",
+                  "type": "file",
+                  "src": [],
+                  "description": "فایل عکس (اختیاری)"
+                }
+              ]
+            }
           }
         },
         {
           "name": "Update Player Avatar Only",
           "request": {
             "method": "POST",
-            "header": [],
-            "body": { "mode": "formdata", "formdata": [{ "key": "avatar", "type": "file", "src": [] }] },
-            "url": { "raw": "{{base_url}}/api/v1/players/{{player_id}}/avatar", "host": ["{{base_url}}"], "path": ["api", "v1", "players", "{{player_id}}", "avatar"] }
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/{{player_id}}/avatar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "players",
+                "{{player_id}}",
+                "avatar"
+              ]
+            },
+            "description": "آپلود فقط آواتار بازیکن (ادمین) — multipart.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "avatar",
+                  "type": "file",
+                  "src": [],
+                  "description": "فایل عکس (اختیاری)"
+                }
+              ]
+            }
           }
         },
         {
           "name": "Delete Player Avatar",
-          "request": { "method": "DELETE", "url": { "raw": "{{base_url}}/api/v1/players/{{player_id}}/avatar", "host": ["{{base_url}}"], "path": ["api", "v1", "players", "{{player_id}}", "avatar"] } }
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/{{player_id}}/avatar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "players",
+                "{{player_id}}",
+                "avatar"
+              ]
+            },
+            "description": "حذف آواتار بازیکن (ادمین)."
+          }
+        },
+        {
+          "name": "Player Guardians (سرپرست‌های بازیکن)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/{{player_id}}/guardians",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "players",
+                "{{player_id}}",
+                "guardians"
+              ]
+            },
+            "description": "سرپرست‌های فعال بازیکن (ادمین) — data آرایه‌ای مستقیم از guardian_player:\n```\n{ \"data\": [ { \"guardian_id\": 4, \"player_id\": 5, \"relation\": \"father\", \"is_primary\": true, \"can_view_reports\": true, \"can_pay\": true, \"guardian\": { \"id\": 4, \"user_id\": 0, \"address\": null, \"emergency_phone\": \"0912...\", \"user\": { \"id\": 0, \"full_name\": \"پدر علی\", \"mobile\": \"09121234567\", \"national_code\": null, \"role\": \"guardian\", \"status\": \"active\" } } } ] }\n```\n(user_id=0 یعنی سرپرست حساب کاربری ندارد — فقط رکورد تماس است)"
+          }
+        },
+        {
+          "name": "Attach New Guardian (ثبت سرپرست جدید)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/players/{{player_id}}/guardians/new",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "players",
+                "{{player_id}}",
+                "guardians",
+                "new"
+              ]
+            },
+            "description": "ساخت سرپرست جدید (فقط رکورد تماس — بدون حساب کاربری و ورود) + اتصال به بازیکن.\nrelation: father | mother | grandfather | grandmother | uncle | aunt | guardian | other\nموبایل الزامی و با الگوی 09xxxxxxxxx.\n\nنمونه پاسخ: { \"data\": { \"guardian_player\": { ...همان شکل بالا... } } }\n(هر بازیکن فقط یک سرپرست فعال دارد — برای تعویض، اول سرپرست فعلی را حذف کن)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"پدر علی\",\n  \"mobile\": \"09121234567\",\n  \"national_code\": \"0012345678\",\n  \"relation\": \"father\",\n  \"emergency_phone\": \"\"\n}"
+            }
+          }
         }
       ]
     },
     {
-      "name": "24 - Client / Me",
+      "name": "05 - Guardians (ادمین)",
+      "description": "سرپرست = فقط رکورد تماس (نام/موبایل/کدملی/نسبت) — حساب کاربری و ورود ندارد.",
       "item": [
         {
-          "name": "Update Own Avatar",
+          "name": "List Guardians",
           "request": {
-            "method": "POST",
-            "header": [],
-            "body": { "mode": "formdata", "formdata": [{ "key": "avatar", "type": "file", "src": [] }] },
-            "url": { "raw": "{{base_url}}/api/v1/me/avatar", "host": ["{{base_url}}"], "path": ["api", "v1", "me", "avatar"] }
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/guardians?page=1&per_page=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "guardians"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "لیست سرپرستان (ادمین) — query: q (جستجوی نام/موبایل/کد ملی), page, per_page.\n\nنمونه پاسخ: { \"data\": { \"items\": [ { \"id\": 4, \"full_name\": \"پدر علی\", \"mobile\": \"09121234567\", \"national_code\": \"0012345678\", \"address\": null, \"emergency_phone\": null, \"notes\": null, \"created_at\": \"...\", \"updated_at\": \"...\", \"user_id\": 0, \"user\": { \"id\": 0, \"full_name\": \"پدر علی\", \"mobile\": \"09121234567\", \"national_code\": \"0012345678\", \"role\": \"guardian\", \"status\": \"active\", \"avatar_url\": \"...\" } } ], \"total\": 3, \"page\": 1, \"per_page\": 20 } }"
           }
         },
         {
-          "name": "Delete Own Avatar",
-          "request": { "method": "DELETE", "url": { "raw": "{{base_url}}/api/v1/me/avatar", "host": ["{{base_url}}"], "path": ["api", "v1", "me", "avatar"] } }
+          "name": "Update Guardian",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{base_url}}/api/v1/guardians/{{guardian_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "guardians",
+                "{{guardian_id}}"
+              ]
+            },
+            "description": "ویرایش سرپرست (ادمین) — full_name, mobile, national_code, address, emergency_phone, notes (فیلدهای ارسالی).\n\nنمونه پاسخ: { \"data\": { \"guardian\": { ... } } }",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"پدر علی\",\n  \"mobile\": \"09121234567\",\n  \"address\": \"...\",\n  \"emergency_phone\": \"09120000000\",\n  \"notes\": \"\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 - Users (ادمین)",
+      "description": "کاربران سیستم — نقش‌ها: admin | coach (حساب‌های player از ثبت بازیکن با کد ملی ساخته می‌شوند).",
+      "item": [
+        {
+          "name": "List Users",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/users?page=1&per_page=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "لیست کاربران (ادمین). query: page, per_page, role, status, q."
+          }
+        },
+        {
+          "name": "Create User (with Avatar)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/users",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ]
+            },
+            "description": "ساخت کاربر (ادمین) — نقش فقط admin یا coach (نقش guardian حذف شده است؛ حساب بازیکن از طریق ثبت بازیکن با کد ملی ساخته می‌شود). password اختیاری — اگر خالی باشد رمز تصادفی در initial_password پاسخ برمی‌گردد.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "full_name",
+                  "value": "علی محمدی",
+                  "type": "text"
+                },
+                {
+                  "key": "mobile",
+                  "value": "09121234567",
+                  "type": "text"
+                },
+                {
+                  "key": "role",
+                  "value": "coach",
+                  "type": "text"
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "Password123",
+                  "type": "text"
+                },
+                {
+                  "key": "avatar",
+                  "type": "file",
+                  "src": [],
+                  "description": "فایل عکس (اختیاری)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update User (with Avatar)",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/{{user_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{user_id}}"
+              ]
+            },
+            "description": "ویرایش کاربر (ادمین) — فقط فیلدهای ارسالی.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "full_name",
+                  "value": "علی محمدی ویرایش",
+                  "type": "text"
+                },
+                {
+                  "key": "avatar",
+                  "type": "file",
+                  "src": [],
+                  "description": "فایل عکس (اختیاری)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update User Avatar Only",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/{{user_id}}/avatar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{user_id}}",
+                "avatar"
+              ]
+            },
+            "description": "آپلود فقط آواتار کاربر (ادمین).",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "avatar",
+                  "type": "file",
+                  "src": [],
+                  "description": "فایل عکس (اختیاری)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete User Avatar",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/{{user_id}}/avatar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{user_id}}",
+                "avatar"
+              ]
+            },
+            "description": "حذف آواتار کاربر (ادمین)."
+          }
         }
       ]
     }
