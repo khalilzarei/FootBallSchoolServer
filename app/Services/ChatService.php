@@ -14,152 +14,519 @@ use App\Repositories\UserRepository;
 
 class ChatService
 {
-    private const ROOM_TYPES = ['player_admin', 'coach_admin', 'player_coach', 'age_group'];
     private const MESSAGE_TYPES = ['text', 'image', 'video', 'file', 'system'];
+
+    private const DEFAULT_GROUP_IMAGE = '/uploads/chat/default-group.webp';
 
     public static function rooms(): array
     {
         $currentUserId = (int) Auth::id();
-        $rooms = ChatRepository::roomsForUser($currentUserId);
-        $memberRoomIds = array_map(fn($r) => (int) $r['id'], $rooms);
 
-        // ─── عضویت خودکار در گفتگوی گروهی گروه‌های سنی (برای کاربران واجد شرایط) ───
+        $rooms = ChatRepository::roomsForUser($currentUserId);
+        $memberRoomIds = array_map(
+            fn($room) => (int) $room['id'],
+            $rooms
+        );
+
+        /*
+         * عضویت خودکار در گروه‌های سنی برای کاربران واجد شرایط
+         */
         $currentUser = Auth::user();
+
         foreach (ChatRepository::ageGroupRooms() as $agRoom) {
-            $agRoomId = (int) $agRoom['id'];
-            if (in_array($agRoomId, $memberRoomIds, true)) continue;
-            if (!ChatRepository::userEligibleForAgeGroup($currentUser, (int) ($agRoom['age_group_id'] ?? 0))) continue;
-            ChatRepository::addMember($agRoomId, $currentUserId, 'member');
+            $roomId = (int) $agRoom['id'];
+
+            if (in_array($roomId, $memberRoomIds, true)) {
+                continue;
+            }
+
+            $ageGroupId = (int) ($agRoom['age_group_id'] ?? 0);
+
+            if ($ageGroupId <= 0) {
+                continue;
+            }
+
+            if (!ChatRepository::userEligibleForAgeGroup($currentUser, $ageGroupId)) {
+                continue;
+            }
+
+            ChatRepository::addMember(
+                $roomId,
+                $currentUserId,
+                'member'
+            );
+
             $rooms[] = $agRoom;
-            $memberRoomIds[] = $agRoomId;
+            $memberRoomIds[] = $roomId;
         }
 
-        if (empty($rooms)) return [];
+        if (empty($rooms)) {
+            return [];
+        }
 
-        $roomIds = array_map(fn($r) => (int) $r['id'], $rooms);
+        $roomIds = array_map(
+            fn($room) => (int) $room['id'],
+            $rooms
+        );
+
         $lastMessages = ChatRepository::lastMessagesForRooms($roomIds);
-        $unreadCounts = ChatRepository::unreadCountsByRoom((int) Auth::id(), $roomIds);
 
-        $out = [];
+        $unreadCounts = ChatRepository::unreadCountsByRoom(
+            $currentUserId,
+            $roomIds
+        );
+
+        $result = [];
+
         foreach ($rooms as $room) {
             $roomId = (int) $room['id'];
-            $out[] = self::hydrateRoom(
+
+            $result[] = self::hydrateRoom(
                 $room,
                 ChatRepository::members($roomId),
                 $lastMessages[$roomId] ?? null,
                 $unreadCounts[$roomId] ?? 0
             );
         }
-        return $out;
+
+        return $result;
     }
 
+    /**
+     * ساخت یا دریافت:
+     *
+     * Private:
+     * {
+     *   "target_user_id": 25
+     * }
+     *
+     * Group:
+     * {
+     *   "is_group": true,
+     *   "title": "نونهالان",
+     *   "user_ids": [10, 25, 31]
+     * }
+     */
     public static function createRoom(array $data): array
     {
         $currentUserId = (int) Auth::id();
         $currentUser = Auth::user();
 
-        // ─── گفتگوی گروهی گروه سنی (فقط ادمین می‌تواند بسازد؛ idempotent با unique_key) ───
-        if ((string) ($data['room_type'] ?? '') === 'age_group') {
-            $ageGroupId = self::normalizeOptionalInt($data['age_group_id'] ?? null);
-            if ($ageGroupId === null) throw new AppException('شناسه گروه سنی الزامی است', 422);
-            if ((string) $currentUser['role'] !== 'admin') throw new AppException('فقط مدیر می‌تواند گفتگوی گروه سنی بسازد', 403);
-            if (!AgeGroupRepository::findById($ageGroupId)) throw new AppException('گروه سنی یافت نشد', 404);
+        /*
+         * سازگاری با درخواست قدیمی age_group
+         */
+        $isLegacyAgeGroup =
+            (string) ($data['room_type'] ?? '') === 'age_group';
 
-            $uniqueKey = hash('sha256', 'age_group-' . $ageGroupId);
+        $isGroup =
+            filter_var(
+                $data['is_group'] ?? false,
+                FILTER_VALIDATE_BOOLEAN
+            ) || $isLegacyAgeGroup;
 
-            $existingRoom = ChatRepository::findByUniqueKey($uniqueKey);
-            if ($existingRoom) {
-                if (!ChatRepository::memberExists((int) $existingRoom['id'], $currentUserId)) {
-                    ChatRepository::addMember((int) $existingRoom['id'], $currentUserId, 'owner');
-                }
-                return self::roomDetails((int) $existingRoom['id']);
-            }
-
-            $roomId = ChatRepository::createRoom([
-                'room_type' => 'age_group',
-                'player_id' => null,
-                'class_id' => null,
-                'age_group_id' => $ageGroupId,
-                'subject' => null,
-                'unique_key' => $uniqueKey,
-                'status' => 'active',
-                'created_by' => $currentUserId,
-            ]);
-
-            ChatRepository::addMember($roomId, $currentUserId, 'owner');
-
-            return self::roomDetails($roomId);
+        if ($isGroup) {
+            return self::createGroupRoom(
+                $data,
+                $currentUserId,
+                $currentUser
+            );
         }
 
-        // ─── اتاق خصوصی دو نفره ───
-        $targetUserId = (int) ($data['target_user_id'] ?? 0);
-        if ($targetUserId <= 0) throw new AppException('شناسه کاربر مقابل معتبر نیست', 422);
+        return self::createPrivateRoom(
+            $data,
+            $currentUserId,
+            $currentUser
+        );
+    }
 
-        if ($targetUserId === $currentUserId) throw new AppException('کاربر نمی‌تواند با خودش اتاق چت بسازد', 422);
+    /**
+     * ساخت یا دریافت اتاق خصوصی دو نفره
+     */
+    private static function createPrivateRoom(
+        array $data,
+        int $currentUserId,
+        array $currentUser
+    ): array {
+        $targetUserId = self::normalizeOptionalInt(
+            $data['target_user_id'] ?? null
+        );
+
+        if ($targetUserId === null) {
+            throw new AppException(
+                'شناسه کاربر مقابل الزامی است',
+                422
+            );
+        }
+
+        if ($targetUserId === $currentUserId) {
+            throw new AppException(
+                'کاربر نمی‌تواند با خودش اتاق چت بسازد',
+                422
+            );
+        }
 
         $targetUser = UserRepository::findById($targetUserId);
 
-        if (!$targetUser || $targetUser['status'] !== 'active') throw new AppException('کاربر مقابل یافت نشد یا فعال نیست', 404);
-
-        $playerId = self::normalizeOptionalInt($data['player_id'] ?? null);
-        $classId = self::normalizeOptionalInt($data['class_id'] ?? null);
-
-        // بازیکنِ مرتبط الزامی نیست، ولی اگر ارسال شود باید واقعی باشد
-        if ($playerId !== null && !PlayerRepository::findById($playerId)) {
-            throw new AppException('بازیکن یافت نشد', 404);
+        if (!$targetUser || (string) ($targetUser['status'] ?? '') !== 'active') {
+            throw new AppException(
+                'کاربر مقابل یافت نشد یا فعال نیست',
+                404
+            );
         }
 
-        // نوع اتاق: اگر اپ نفرستاده باشد (سرپرست/مربی به پروفایل کاربران دسترسی ندارد)،
-        // سرور خودش از نقش دو کاربر استنتاج می‌کند
-        $roomType = (string) ($data['room_type'] ?? '');
-        if ($roomType === '') {
-            $roomType = self::inferRoomType($currentUser, $targetUser) ?? '';
-        }
-        if ($roomType === '' || !in_array($roomType, self::ROOM_TYPES, true)) {
-            throw new AppException('نوع اتاق چت معتبر نیست', 422);
+        /*
+         * بررسی ارتباط مجاز بین نقش‌ها.
+         *
+         * دیگر room_type از سمت کلاینت لازم نیست.
+         * نوع ارتباط فقط برای authorization استفاده می‌شود.
+         */
+        self::assertPrivateRoomPermission(
+            $currentUser,
+            $targetUser
+        );
+
+        $playerId = self::normalizeOptionalInt(
+            $data['player_id'] ?? null
+        );
+
+        $classId = self::normalizeOptionalInt(
+            $data['class_id'] ?? null
+        );
+
+        if (
+            $playerId !== null &&
+            !PlayerRepository::findById($playerId)
+        ) {
+            throw new AppException(
+                'بازیکن یافت نشد',
+                404
+            );
         }
 
-        self::assertRoomPermission($roomType, $currentUser, $targetUser);
+        /*
+         * پیدا کردن اتاق خصوصی مستقل از ترتیب user1/user2
+         */
+        $existingRoom = ChatRepository::findPrivateRoom(
+            $currentUserId,
+            $targetUserId
+        );
 
+        if ($existingRoom) {
+            $existingRoomId = (int) $existingRoom['id'];
+
+            if (
+                !ChatRepository::memberExists(
+                    $existingRoomId,
+                    $currentUserId
+                )
+            ) {
+                ChatRepository::addMember(
+                    $existingRoomId,
+                    $currentUserId,
+                    'owner'
+                );
+            }
+
+            if (
+                !ChatRepository::memberExists(
+                    $existingRoomId,
+                    $targetUserId
+                )
+            ) {
+                ChatRepository::addMember(
+                    $existingRoomId,
+                    $targetUserId,
+                    'member'
+                );
+            }
+
+            /*
+             * اگر اتاق از پروفایل بازیکن ایجاد شده باشد،
+             * player_id در صورت نیاز تکمیل می‌شود.
+             */
+            if (
+                $playerId !== null &&
+                isset($existingRoom['player_id']) &&
+                $existingRoom['player_id'] === null
+            ) {
+                ChatRepository::updateRoomPlayer(
+                    $existingRoomId,
+                    $playerId
+                );
+            }
+
+            return self::roomDetails($existingRoomId);
+        }
+
+        /*
+         * user1/user2 فقط برای identity داخلی دیتابیس هستند.
+         * API از users[] استفاده می‌کند.
+         */
         $userIds = [$currentUserId, $targetUserId];
         sort($userIds);
 
-        $uniqueSource = $roomType . '-' . implode('-', $userIds);
+        $uniqueKey = hash(
+            'sha256',
+            'private-' . implode('-', $userIds)
+        );
 
-        if ($roomType === 'player_coach' && $playerId !== null) {
-            $uniqueSource .= '-player-' . $playerId;
-        }
-
-        $uniqueKey = hash('sha256', $uniqueSource);
-
-        $existingRoom = ChatRepository::findByUniqueKey($uniqueKey);
-
-        if ($existingRoom) {
-            if (!ChatRepository::memberExists((int) $existingRoom['id'], $currentUserId)) {
-                ChatRepository::addMember((int) $existingRoom['id'], $currentUserId, 'member');
-            }
-            if (!ChatRepository::memberExists((int) $existingRoom['id'], $targetUserId)) {
-                ChatRepository::addMember((int) $existingRoom['id'], $targetUserId, 'member');
-            }
-            // اگر اتاق قبلاً بدون player_id ساخته شده بود و این بار از پروفایل بازیکن باز شده، تکمیل می‌شود
-            if ($playerId !== null && $existingRoom['player_id'] === null) {
-                ChatRepository::updateRoomPlayer((int) $existingRoom['id'], $playerId);
-            }
-            return self::roomDetails((int) $existingRoom['id']);
-        }
-
+        /*
+         * برای سازگاری با دیتابیس‌های قدیمی،
+         * room_type همچنان مقدار private می‌گیرد.
+         */
         $roomId = ChatRepository::createRoom([
-            'room_type' => $roomType,
+            'room_type' => 'private',
+            'is_group' => false,
+
+            'user1_id' => $userIds[0],
+            'user2_id' => $userIds[1],
+
             'player_id' => $playerId,
             'class_id' => $classId,
-            'subject' => trim((string) ($data['subject'] ?? '')) ?: null,
+
+            'title' => null,
+            'image' => null,
+
+            'subject' => trim(
+                (string) ($data['subject'] ?? '')
+            ) ?: null,
+
             'unique_key' => $uniqueKey,
             'status' => 'active',
             'created_by' => $currentUserId,
         ]);
 
-        ChatRepository::addMember($roomId, $currentUserId, 'owner');
-        ChatRepository::addMember($roomId, $targetUserId, 'member');
+        ChatRepository::addMember(
+            $roomId,
+            $currentUserId,
+            'owner'
+        );
+
+        ChatRepository::addMember(
+            $roomId,
+            $targetUserId,
+            'member'
+        );
+
+        return self::roomDetails($roomId);
+    }
+
+    /**
+     * ساخت گروه
+     */
+    private static function createGroupRoom(
+        array $data,
+        int $currentUserId,
+        array $currentUser
+    ): array {
+        if ((string) ($currentUser['role'] ?? '') !== 'admin') {
+            throw new AppException(
+                'فقط مدیر می‌تواند گروه گفتگو ایجاد کند',
+                403
+            );
+        }
+
+        /*
+         * پشتیبانی از گروه‌های سنی قدیمی
+         */
+        $ageGroupId = self::normalizeOptionalInt(
+            $data['age_group_id'] ?? null
+        );
+
+        $isAgeGroup =
+            $ageGroupId !== null ||
+            (string) ($data['room_type'] ?? '') === 'age_group';
+
+        if ($isAgeGroup) {
+            if ($ageGroupId === null) {
+                throw new AppException(
+                    'شناسه گروه سنی الزامی است',
+                    422
+                );
+            }
+
+            $ageGroup = AgeGroupRepository::findById($ageGroupId);
+
+            if (!$ageGroup) {
+                throw new AppException(
+                    'گروه سنی یافت نشد',
+                    404
+                );
+            }
+        }
+
+        /*
+         * عنوان گروه
+         */
+        $title = trim(
+            (string) ($data['title'] ?? '')
+        );
+
+        if ($title === '' && $isAgeGroup) {
+            $title = trim(
+                (string) ($ageGroup['title'] ?? '')
+            );
+        }
+
+        if ($title === '') {
+            throw new AppException(
+                'عنوان گروه الزامی است',
+                422
+            );
+        }
+
+        /*
+         * تصویر گروه
+         */
+        $image = trim(
+            (string) ($data['image'] ?? '')
+        );
+
+        if ($image === '') {
+            $image = self::DEFAULT_GROUP_IMAGE;
+        }
+
+        /*
+         * اعضای گروه
+         */
+        $requestedUserIds = $data['user_ids'] ?? [];
+
+        if (!is_array($requestedUserIds)) {
+            throw new AppException(
+                'user_ids باید آرایه باشد',
+                422
+            );
+        }
+
+        $userIds = [];
+
+        foreach ($requestedUserIds as $userId) {
+            $normalizedUserId = self::normalizeOptionalInt($userId);
+
+            if ($normalizedUserId === null) {
+                continue;
+            }
+
+            $userIds[] = $normalizedUserId;
+        }
+
+        /*
+         * مدیر سازنده همیشه عضو گروه است.
+         */
+        $userIds[] = $currentUserId;
+
+        $userIds = array_values(
+            array_unique($userIds)
+        );
+
+        /*
+         * بررسی وجود و فعال بودن تمام کاربران
+         */
+        foreach ($userIds as $userId) {
+            $user = UserRepository::findById($userId);
+
+            if (!$user || (string) ($user['status'] ?? '') !== 'active') {
+                throw new AppException(
+                    'یکی از کاربران انتخاب‌شده یافت نشد یا فعال نیست',
+                    404
+                );
+            }
+        }
+
+        /*
+         * برای گروه سنی، فقط یک گروه برای هر age_group_id وجود دارد.
+         *
+         * برای گروه معمولی، title + اعضا identity گروه را می‌سازد.
+         */
+        if ($isAgeGroup) {
+            $uniqueKey = hash(
+                'sha256',
+                'age_group-' . $ageGroupId
+            );
+        } else {
+            $uniqueIds = $userIds;
+            sort($uniqueIds);
+
+            $uniqueKey = hash(
+                'sha256',
+                'group-' .
+                md5(implode(',', $uniqueIds)) .
+                '-' .
+                md5(mb_strtolower($title))
+            );
+        }
+
+        $existingRoom = ChatRepository::findByUniqueKey(
+            $uniqueKey
+        );
+
+        if ($existingRoom) {
+            $roomId = (int) $existingRoom['id'];
+
+            /*
+             * اعضای جدید را به گروه اضافه می‌کنیم.
+             */
+            foreach ($userIds as $userId) {
+                if (!ChatRepository::memberExists($roomId, $userId)) {
+                    ChatRepository::addMember(
+                        $roomId,
+                        $userId,
+                        $userId === $currentUserId
+                            ? 'owner'
+                            : 'member'
+                    );
+                }
+            }
+
+            /*
+             * اگر گروه سنی قبلاً ساخته شده باشد،
+             * همان اتاق استفاده می‌شود.
+             */
+            return self::roomDetails($roomId);
+        }
+
+        /*
+         * room_type برای compatibility داخلی نگه داشته می‌شود.
+         * API دیگر به room_type وابسته نیست.
+         */
+        $roomType = $isAgeGroup
+            ? 'age_group'
+            : 'group';
+
+        $roomId = ChatRepository::createRoom([
+            'room_type' => $roomType,
+            'is_group' => true,
+
+            'user1_id' => null,
+            'user2_id' => null,
+
+            'title' => $title,
+            'image' => $image,
+
+            'player_id' => null,
+            'class_id' => self::normalizeOptionalInt(
+                $data['class_id'] ?? null
+            ),
+            'age_group_id' => $ageGroupId,
+
+            'subject' => trim(
+                (string) ($data['subject'] ?? '')
+            ) ?: null,
+
+            'unique_key' => $uniqueKey,
+            'status' => 'active',
+            'created_by' => $currentUserId,
+        ]);
+
+        foreach ($userIds as $userId) {
+            ChatRepository::addMember(
+                $roomId,
+                $userId,
+                $userId === $currentUserId
+                    ? 'owner'
+                    : 'member'
+            );
+        }
 
         return self::roomDetails($roomId);
     }
@@ -168,17 +535,56 @@ class ChatService
     {
         $room = self::requireRoom($roomId);
 
-        // عضویت خودکار در گفتگوی گروهی گروه سنی (کاربر واجد شرایطی که هنوز عضو نشده است)
-        if (($room['room_type'] ?? '') === 'age_group') {
-            $currentUserId = (int) Auth::id();
-            if (!ChatRepository::isMember($roomId, $currentUserId)
-                && ChatRepository::userEligibleForAgeGroup(Auth::user(), (int) ($room['age_group_id'] ?? 0))) {
-                ChatRepository::addMember($roomId, $currentUserId, 'member');
-            }
+        $currentUserId = (int) Auth::id();
+
+        /*
+         * گروه سنی:
+         * اگر کاربر واجد شرایط باشد ولی هنوز عضو نشده باشد،
+         * به صورت خودکار عضو می‌شود.
+         */
+        $isGroup = self::isGroupRoom($room);
+
+        $ageGroupId = self::normalizeOptionalInt(
+            $room['age_group_id'] ?? null
+        );
+
+        if (
+            $isGroup &&
+            $ageGroupId !== null &&
+            !ChatRepository::isMember($roomId, $currentUserId) &&
+            ChatRepository::userEligibleForAgeGroup(
+                Auth::user(),
+                $ageGroupId
+            )
+        ) {
+            ChatRepository::addMember(
+                $roomId,
+                $currentUserId,
+                'member'
+            );
         }
 
-        $lastMessages = ChatRepository::lastMessagesForRooms([$roomId]);
-        $unreadCounts = ChatRepository::unreadCountsByRoom((int) Auth::id(), [$roomId]);
+        /*
+         * فقط اعضای گروه می‌توانند جزئیات و پیام‌ها را ببینند.
+         *
+         * استثنا: گروه سنی ممکن است به صورت lazy عضو کاربر واجد
+         * شرایط شود. بعد از آن بررسی می‌کنیم.
+         */
+        if (!ChatRepository::isMember($roomId, $currentUserId)) {
+            throw new AppException(
+                'شما عضو این اتاق چت نیستید',
+                403
+            );
+        }
+
+        $lastMessages = ChatRepository::lastMessagesForRooms([
+            $roomId
+        ]);
+
+        $unreadCounts = ChatRepository::unreadCountsByRoom(
+            $currentUserId,
+            [$roomId]
+        );
 
         return self::hydrateRoom(
             $room,
@@ -188,229 +594,560 @@ class ChatService
         );
     }
 
-    public static function messages(int $roomId, array $query): array
-    {
+    public static function messages(
+        int $roomId,
+        array $query
+    ): array {
         self::requireRoom($roomId);
 
-        if (!ChatRepository::isMember($roomId, (int) Auth::id())) throw new AppException('شما عضو این اتاق چت نیستید', 403);
+        $userId = (int) Auth::id();
 
-        $limit = (int) ($query['limit'] ?? 50);
-        if ($limit < 1) $limit = 50;
-        if ($limit > 100) $limit = 100;
-
-        $lastReadMessageId = ChatRepository::getLastReadMessageId($roomId, (int) Auth::id());
-
-        return ChatRepository::messages($roomId, $limit, $lastReadMessageId);
-    }
-
-    public static function sendMessage(int $roomId, array $data): array
-    {
-        $room = self::requireRoom($roomId);
-
-        if (!ChatRepository::isMember($roomId, (int) Auth::id())) throw new AppException('شما عضو این اتاق چت نیستید', 403);
-
-        // اگر مدیر گفتگو را قفل کرده باشد، فقط خودش می‌تواند پیام بفرستد
-        if ((int) ($room['is_locked'] ?? 0) === 1 && (string) Auth::role() !== 'admin') {
-            throw new AppException('این گفتگو توسط مدیر قفل شده است', 403);
+        if (!ChatRepository::isMember($roomId, $userId)) {
+            throw new AppException(
+                'شما عضو این اتاق چت نیستید',
+                403
+            );
         }
 
-        $messageType = (string) ($data['message_type'] ?? 'text');
-        if (!in_array($messageType, self::MESSAGE_TYPES, true)) throw new AppException('نوع پیام معتبر نیست', 422);
+        $limit = (int) ($query['limit'] ?? 50);
 
-        $body = trim((string) ($data['body'] ?? ''));
-        if ($messageType === 'text' && $body === '') throw new AppException('متن پیام نمی‌تواند خالی باشد', 422);
+        if ($limit < 1) {
+            $limit = 50;
+        }
 
-        $mediaId = self::normalizeOptionalInt($data['media_id'] ?? null);
+        if ($limit > 100) {
+            $limit = 100;
+        }
+
+        $before = null;
+
+        if (
+            isset($query['before']) &&
+            $query['before'] !== '' &&
+            filter_var(
+                $query['before'],
+                FILTER_VALIDATE_INT
+            ) !== false
+        ) {
+            $before = (int) $query['before'];
+
+            if ($before <= 0) {
+                $before = null;
+            }
+        }
+
+        $lastReadMessageId =
+            ChatRepository::getLastReadMessageId(
+                $roomId,
+                $userId
+            );
+
+        return ChatRepository::messages(
+            roomId: $roomId,
+            limit: $limit,
+            lastReadMessageId: $lastReadMessageId,
+            before: $before
+        );
+    }
+
+    public static function sendMessage(
+        int $roomId,
+        array $data
+    ): array {
+        $room = self::requireRoom($roomId);
+
+        $currentUserId = (int) Auth::id();
+
+        if (!ChatRepository::isMember($roomId, $currentUserId)) {
+            throw new AppException(
+                'شما عضو این اتاق چت نیستید',
+                403
+            );
+        }
+
+        /*
+         * اگر گفتگو قفل باشد، فقط ادمین می‌تواند پیام بفرستد.
+         */
+        if (
+            (int) ($room['is_locked'] ?? 0) === 1 &&
+            (string) Auth::role() !== 'admin'
+        ) {
+            throw new AppException(
+                'این گفتگو توسط مدیر قفل شده است',
+                403
+            );
+        }
+
+        $messageType = (string) (
+            $data['message_type'] ?? 'text'
+        );
+
+        if (!in_array(
+            $messageType,
+            self::MESSAGE_TYPES,
+            true
+        )) {
+            throw new AppException(
+                'نوع پیام معتبر نیست',
+                422
+            );
+        }
+
+        $body = trim(
+            (string) ($data['body'] ?? '')
+        );
+
+        if (
+            $messageType === 'text' &&
+            $body === ''
+        ) {
+            throw new AppException(
+                'متن پیام نمی‌تواند خالی باشد',
+                422
+            );
+        }
+
+        $mediaId = self::normalizeOptionalInt(
+            $data['media_id'] ?? null
+        );
 
         $messageId = ChatRepository::createMessage([
             'chat_room_id' => $roomId,
-            'sender_id' => Auth::id(),
+            'sender_id' => $currentUserId,
             'message_type' => $messageType,
             'body' => $body !== '' ? $body : null,
             'media_id' => $mediaId,
         ]);
 
-        $message = ChatRepository::findMessageById($messageId);
+        $message = ChatRepository::findMessageById(
+            $messageId
+        );
 
-        self::broadcastMessage($roomId, $message);
+        self::broadcastMessage(
+            $roomId,
+            $message
+        );
 
         return $message;
     }
 
-    public static function read(int $roomId, array $data): array
-    {
+    public static function read(
+        int $roomId,
+        array $data
+    ): array {
         self::requireRoom($roomId);
 
-        if (!ChatRepository::isMember($roomId, (int) Auth::id())) throw new AppException('شما عضو این اتاق چت نیستید', 403);
+        $userId = (int) Auth::id();
 
-        $lastReadMessageId = (int) ($data['last_read_message_id'] ?? 0);
-        if ($lastReadMessageId <= 0) throw new AppException('شناسه آخرین پیام معتبر نیست', 422);
+        if (!ChatRepository::isMember($roomId, $userId)) {
+            throw new AppException(
+                'شما عضو این اتاق چت نیستید',
+                403
+            );
+        }
 
-        ChatRepository::updateLastRead($roomId, (int) Auth::id(), $lastReadMessageId);
+        $lastReadMessageId = (int) (
+            $data['last_read_message_id'] ?? 0
+        );
 
-        return ['room_id' => $roomId, 'last_read_message_id' => $lastReadMessageId];
+        if ($lastReadMessageId <= 0) {
+            throw new AppException(
+                'شناسه آخرین پیام معتبر نیست',
+                422
+            );
+        }
+
+        if (
+            !ChatRepository::messageBelongsToRoom(
+                $lastReadMessageId,
+                $roomId
+            )
+        ) {
+            throw new AppException(
+                'پیام متعلق به این گفتگو نیست',
+                422
+            );
+        }
+
+        ChatRepository::updateLastRead(
+            $roomId,
+            $userId,
+            $lastReadMessageId
+        );
+
+        return [
+            'room_id' => $roomId,
+            'last_read_message_id' => $lastReadMessageId,
+        ];
     }
 
-    /** قفل/باز کردن گفتگو توسط ادمین — وقتی قفل باشد کاربران دیگر نمی‌توانند پیام بفرستند */
-    public static function setRoomLocked(int $roomId, bool $locked): array
-    {
+    /**
+     * قفل/باز کردن گفتگو توسط ادمین
+     */
+    public static function setRoomLocked(
+        int $roomId,
+        bool $locked
+    ): array {
         self::requireRoom($roomId);
 
-        ChatRepository::setRoomLocked($roomId, $locked);
+        if ((string) Auth::role() !== 'admin') {
+            throw new AppException(
+                'فقط مدیر می‌تواند وضعیت قفل گفتگو را تغییر دهد',
+                403
+            );
+        }
+
+        ChatRepository::setRoomLocked(
+            $roomId,
+            $locked
+        );
 
         return self::roomDetails($roomId);
     }
 
-    private static function requireRoom(int $roomId): array
-    {
+    /**
+     * بررسی وجود اتاق
+     */
+    private static function requireRoom(
+        int $roomId
+    ): array {
         $room = ChatRepository::findById($roomId);
-        if (!$room) throw new AppException('اتاق چت یافت نشد', 404);
+
+        if (!$room) {
+            throw new AppException(
+                'اتاق چت یافت نشد',
+                404
+            );
+        }
+
         return $room;
     }
 
     /**
-     * شکل نهایی اتاق چت برای اپ:
-     * شناسه/نام کاربر مقابل + آخرین پیام + شمار پیام خوانده‌نشده + اعضای شکل‌یافته
+     * تعیین گروهی/خصوصی بودن اتاق.
+     *
+     * is_group فیلد اصلی است.
+     * برای دیتابیس‌های قدیمی age_group نیز پشتیبانی می‌شود.
      */
-    private static function hydrateRoom(array $room, array $members, ?array $lastMessage, int $unreadCount): array
-    {
-        $currentUserId = (int) Auth::id();
-        $target = null;
-        $shapedMembers = [];
-
-        // گفتگوی گروهی گروه سنی؟ (عنوان اتاق = عنوان گروه سنی)
-        $isAgeGroup = ((string) ($room['room_type'] ?? '')) === 'age_group';
-        $ageGroup = null;
-        if ($isAgeGroup && !empty($room['age_group_id'])) {
-            $ageGroup = AgeGroupRepository::findById((int) $room['age_group_id']);
+    private static function isGroupRoom(
+        array $room
+    ): bool {
+        if (array_key_exists('is_group', $room)) {
+            return (int) $room['is_group'] === 1;
         }
 
-        foreach ($members as $m) {
-            $shapedMembers[] = [
-                'user_id' => (int) $m['user_id'],
-                'full_name' => (string) ($m['full_name'] ?? ''),
-                'role' => (string) ($m['user_role'] ?? ''),
-                'member_role' => (string) ($m['member_role'] ?? 'member'),
-                'last_read_message_id' => (int) ($m['last_read_message_id'] ?? 0),
+        return (string) ($room['room_type'] ?? '') === 'age_group';
+    }
+
+    /**
+     * تبدیل اطلاعات دیتابیس به API جدید:
+     *
+     * {
+     *   "id": 15,
+     *   "is_group": false,
+     *   "title": "علی رضایی",
+     *   "image": "/uploads/users/25.jpg",
+     *   "users": [...],
+     *   "last_message": null,
+     *   "unread_count": 0
+     * }
+     */
+    private static function hydrateRoom(
+        array $room,
+        array $members,
+        ?array $lastMessage,
+        int $unreadCount
+    ): array {
+        $currentUserId = (int) Auth::id();
+
+        $isGroup = self::isGroupRoom($room);
+
+        $shapedUsers = [];
+        $targetUser = null;
+
+        foreach ($members as $member) {
+            $userId = (int) ($member['user_id'] ?? 0);
+
+            $avatar = trim(
+                (string) (
+                    $member['avatar_path']
+                    ?? $member['avatar']
+                    ?? ''
+                )
+            );
+
+            $userData = [
+                'id' => $userId,
+
+                'full_name' => (string) (
+                    $member['full_name'] ?? ''
+                ),
+
+                'avatar' => $avatar !== ''
+                    ? $avatar
+                    : null,
+
+                'role' => (string) (
+                    $member['user_role']
+                    ?? $member['role']
+                    ?? ''
+                ),
+
+                'member_role' => (string) (
+                    $member['member_role']
+                    ?? 'member'
+                ),
             ];
-            if ((int) $m['user_id'] !== $currentUserId) {
-                $target = $m;
+
+            $shapedUsers[] = $userData;
+
+            if (
+                !$isGroup &&
+                $userId !== $currentUserId
+            ) {
+                $targetUser = $member;
+            }
+        }
+
+        /*
+         * برای چت خصوصی:
+         * title و image از کاربر مقابل می‌آید.
+         */
+        if (!$isGroup) {
+            $title = $targetUser
+                ? (string) (
+                    $targetUser['full_name'] ?? ''
+                )
+                : '';
+
+            $image = $targetUser
+                ? trim(
+                    (string) (
+                        $targetUser['avatar_path']
+                        ?? $targetUser['avatar']
+                        ?? ''
+                    )
+                )
+                : '';
+
+            if ($image === '') {
+                $image = null;
+            }
+        } else {
+            /*
+             * برای گروه:
+             * title و image متعلق به خود room است.
+             */
+            $title = trim(
+                (string) ($room['title'] ?? '')
+            );
+
+            if ($title === '') {
+                $title = 'گروه گفتگو';
+            }
+
+            $image = trim(
+                (string) ($room['image'] ?? '')
+            );
+
+            if ($image === '') {
+                $image = self::DEFAULT_GROUP_IMAGE;
             }
         }
 
         return [
             'id' => (int) $room['id'],
-            'room_type' => (string) $room['room_type'],
-            'player_id' => isset($room['player_id']) ? (int) $room['player_id'] : null,
-            'class_id' => isset($room['class_id']) ? (int) $room['class_id'] : null,
-            'subject' => $room['subject'] ?? null,
-            'status' => $room['status'] ?? 'active',
-            'created_at' => $room['created_at'] ?? null,
-            'updated_at' => $room['updated_at'] ?? null,
-            'target_user_id' => $isAgeGroup ? null : ($target ? (int) $target['user_id'] : null),
-            'target_user_name' => $isAgeGroup
-                ? ($ageGroup['title'] ?? 'گروه سنی')
-                : ($target ? (string) ($target['full_name'] ?? '') : null),
-            'target_user_role' => $isAgeGroup ? null : ($target ? (string) ($target['user_role'] ?? '') : null),
-            'age_group_id' => $isAgeGroup && !empty($room['age_group_id']) ? (int) $room['age_group_id'] : null,
-            'age_group_title' => $ageGroup ? (string) $ageGroup['title'] : null,
-            'is_locked' => (int) ($room['is_locked'] ?? 0) === 1,
-            'member_count' => count($members),
-            'members' => $shapedMembers,
+
+            'is_group' => $isGroup,
+
+            'title' => $title,
+
+            'image' => $image,
+
+            'users' => $shapedUsers,
+
             'last_message' => $lastMessage,
+
             'unread_count' => $unreadCount,
         ];
     }
 
-    private static function assertRoomPermission(string $roomType, array $currentUser, array $targetUser): void
-    {
-        $role = (string) $currentUser['role'];
-        $targetRole = (string) $targetUser['role'];
+    /**
+     * بررسی دسترسی ساخت چت خصوصی.
+     *
+     * room_type دیگر بخشی از API نیست،
+     * ولی محدودیت‌های قبلی نقش‌ها حفظ می‌شوند.
+     */
+    private static function assertPrivateRoomPermission(
+        array $currentUser,
+        array $targetUser
+    ): void {
+        $role = (string) ($currentUser['role'] ?? '');
+        $targetRole = (string) ($targetUser['role'] ?? '');
 
-        if ($roomType === 'player_admin') {
-            $allowed = ($role === 'player' && $targetRole === 'admin')
-                || ($role === 'admin' && $targetRole === 'player');
-            if (!$allowed) throw new AppException('نقش کاربران برای این چت معتبر نیست', 403);
+        /*
+         * admin <-> player
+         */
+        if (
+            ($role === 'admin' && $targetRole === 'player') ||
+            ($role === 'player' && $targetRole === 'admin')
+        ) {
             return;
         }
 
-        if ($roomType === 'coach_admin') {
-            $allowed = ($role === 'coach' && $targetRole === 'admin')
-                || ($role === 'admin' && $targetRole === 'coach');
-            if (!$allowed) throw new AppException('نقش کاربران برای این چت معتبر نیست', 403);
+        /*
+         * admin <-> coach
+         */
+        if (
+            ($role === 'admin' && $targetRole === 'coach') ||
+            ($role === 'coach' && $targetRole === 'admin')
+        ) {
             return;
         }
 
-        if ($roomType === 'player_coach') {
-            if ($role === 'player' && $targetRole === 'coach') {
-                if (!ChatRepository::playerCanChatCoach((int) $currentUser['id'], (int) $targetUser['id'])) {
-                    throw new AppException('این مربی به کلاس‌های فعال این بازیکن مرتبط نیست', 403);
-                }
-                return;
+        /*
+         * player <-> coach
+         */
+        if (
+            $role === 'player' &&
+            $targetRole === 'coach'
+        ) {
+            if (
+                !ChatRepository::playerCanChatCoach(
+                    (int) $currentUser['id'],
+                    (int) $targetUser['id']
+                )
+            ) {
+                throw new AppException(
+                    'این مربی به کلاس‌های فعال این بازیکن مرتبط نیست',
+                    403
+                );
             }
 
-            if ($role === 'coach' && $targetRole === 'player') {
-                if (!ChatRepository::coachCanChatPlayer((int) $currentUser['id'], (int) $targetUser['id'])) {
-                    throw new AppException('این بازیکن به کلاس‌های فعال این مربی مرتبط نیست', 403);
-                }
-                return;
-            }
-
-            throw new AppException('نقش کاربران برای این چت معتبر نیست', 403);
+            return;
         }
+
+        if (
+            $role === 'coach' &&
+            $targetRole === 'player'
+        ) {
+            if (
+                !ChatRepository::coachCanChatPlayer(
+                    (int) $currentUser['id'],
+                    (int) $targetUser['id']
+                )
+            ) {
+                throw new AppException(
+                    'این بازیکن به کلاس‌های فعال این مربی مرتبط نیست',
+                    403
+                );
+            }
+
+            return;
+        }
+
+        throw new AppException(
+            'نقش کاربران برای این چت معتبر نیست',
+            403
+        );
     }
 
-    /** استنتاج نوع اتاق از نقش دو کاربر (وقتی اپ room_type نفرستاده) */
-    private static function inferRoomType(array $currentUser, array $targetUser): ?string
-    {
-        $pair = [(string) $currentUser['role'], (string) $targetUser['role']];
-        sort($pair);
-        $key = implode('-', $pair);
-        if ($key === 'admin-player') return 'player_admin';
-        if ($key === 'admin-coach') return 'coach_admin';
-        if ($key === 'coach-player') return 'player_coach';
-        return null;
-    }
+    private static function broadcastMessage(
+        int $roomId,
+        array $message
+    ): void {
+        $url = Config::get(
+            'chat.node_internal_url'
+        );
 
-    private static function broadcastMessage(int $roomId, array $message): void
-    {
-        $url = Config::get('chat.node_internal_url');
-        if (!$url) return;
+        if (!$url) {
+            return;
+        }
 
-        $secret = Config::get('chat.internal_secret');
+        $secret = Config::get(
+            'chat.internal_secret'
+        );
 
-        $payload = json_encode([
-            'room_id' => $roomId,
-            'message' => $message,
-        ], JSON_UNESCAPED_UNICODE);
+        $payload = json_encode(
+            [
+                'room_id' => $roomId,
+                'message' => $message,
+            ],
+            JSON_UNESCAPED_UNICODE
+        );
 
         if (function_exists('curl_init')) {
             $ch = curl_init($url);
 
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 2);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Content-Type: application/json',
-                'X-Internal-Secret: ' . $secret,
-            ]);
+            curl_setopt(
+                $ch,
+                CURLOPT_POST,
+                true
+            );
+
+            curl_setopt(
+                $ch,
+                CURLOPT_POSTFIELDS,
+                $payload
+            );
+
+            curl_setopt(
+                $ch,
+                CURLOPT_RETURNTRANSFER,
+                true
+            );
+
+            curl_setopt(
+                $ch,
+                CURLOPT_TIMEOUT,
+                2
+            );
+
+            curl_setopt(
+                $ch,
+                CURLOPT_HTTPHEADER,
+                [
+                    'Content-Type: application/json',
+                    'X-Internal-Secret: ' . $secret,
+                ]
+            );
 
             curl_exec($ch);
 
             if (curl_errno($ch)) {
-                error_log('Chat broadcast error: ' . curl_error($ch));
+                error_log(
+                    'Chat broadcast error: ' .
+                    curl_error($ch)
+                );
             }
 
             curl_close($ch);
         }
     }
 
-    private static function normalizeOptionalInt(mixed $value): ?int
-    {
-        if ($value === null || $value === '') return null;
-        if (filter_var($value, FILTER_VALIDATE_INT) === false) throw new AppException('شناسه معتبر نیست', 422);
-        $v = (int) $value;
-        return $v > 0 ? $v : null;
+    private static function normalizeOptionalInt(
+        mixed $value
+    ): ?int {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (
+            filter_var(
+                $value,
+                FILTER_VALIDATE_INT
+            ) === false
+        ) {
+            throw new AppException(
+                'شناسه معتبر نیست',
+                422
+            );
+        }
+
+        $value = (int) $value;
+
+        return $value > 0
+            ? $value
+            : null;
     }
 }
