@@ -123,6 +123,10 @@ $router->get('/api/v1/players/{id}/guardians', [PlayerController::class, 'guardi
 
 $router->post('/api/v1/players/{id}/guardians', [PlayerController::class, 'attachGuardian'], ['auth', 'admin']);
 
+$router->post('/api/v1/players/{id}/guardians/new', [PlayerController::class, 'attachNewGuardian'], ['auth', 'admin']);
+
+$router->put('/api/v1/players/{id}/guardians/{guardian_id}', [PlayerController::class, 'updateGuardian'], ['auth', 'admin']);
+
 $router->delete('/api/v1/players/{id}/guardians/{guardian_id}', [PlayerController::class, 'detachGuardian'], ['auth', 'admin']);
 
 $router->get('/api/v1/players/{id}/attendances', [AttendanceController::class, 'playerAttendances'], ['auth', 'admin']);
@@ -171,6 +175,8 @@ $router->post('/api/v1/age-groups/{id}/activate', [AgeGroupController::class, 'a
 
 $router->post('/api/v1/age-groups/{id}/deactivate', [AgeGroupController::class, 'deactivate'], ['auth', 'admin']);
 
+$router->get('/api/v1/age-groups/{id}/players', [AgeGroupController::class, 'players'], ['auth', 'admin']);
+
 /*
 |--------------------------------------------------------------------------
 | Coaches
@@ -196,6 +202,8 @@ $router->post('/api/v1/classes', [ClassController::class, 'store'], ['auth', 'ad
 $router->get('/api/v1/classes/{id}', [ClassController::class, 'show'], ['auth', 'admin']);
 
 $router->put('/api/v1/classes/{id}', [ClassController::class, 'update'], ['auth', 'admin']);
+
+$router->delete('/api/v1/classes/{id}', [ClassController::class, 'destroy'], ['auth', 'admin']);
 
 $router->post('/api/v1/classes/{id}/activate', [ClassController::class, 'activate'], ['auth', 'admin']);
 
@@ -226,6 +234,8 @@ $router->post('/api/v1/schedules/{id}/deactivate', [ClassScheduleController::cla
 $router->get('/api/v1/classes/{id}/players', [EnrollmentController::class, 'index'], ['auth', 'admin']);
 
 $router->post('/api/v1/classes/{id}/players', [EnrollmentController::class, 'store'], ['auth', 'admin']);
+
+$router->post('/api/v1/classes/{id}/enroll-age-group', [EnrollmentController::class, 'enrollAgeGroup'], ['auth', 'admin']);
 
 $router->get('/api/v1/enrollments/{id}', [EnrollmentController::class, 'show'], ['auth', 'admin']);
 
@@ -262,6 +272,8 @@ $router->post('/api/v1/sessions/{id}/complete', [SessionController::class, 'comp
 */
 
 $router->get('/api/v1/sessions/{id}/attendance', [AttendanceController::class, 'index'], ['auth', 'admin']);
+
+$router->get('/api/v1/sessions/{id}/attendance-sheet', [AttendanceController::class, 'sheet'], ['auth', 'admin']);
 
 $router->post('/api/v1/sessions/{id}/attendance', [AttendanceController::class, 'saveBulk'], ['auth', 'admin']);
 
@@ -449,6 +461,10 @@ $router->post('/api/v1/chat/rooms/{id}/messages', [ChatController::class, 'sendM
 
 $router->post('/api/v1/chat/rooms/{id}/read', [ChatController::class, 'read'], ['auth']);
 
+$router->post('/api/v1/chat/rooms/{id}/lock', [ChatController::class, 'lockRoom'], ['auth', 'admin']);
+
+$router->post('/api/v1/chat/rooms/{id}/unlock', [ChatController::class, 'unlockRoom'], ['auth', 'admin']);
+
 /*
 |--------------------------------------------------------------------------
 | Reports
@@ -480,3 +496,9 @@ $router->get('/api/v1/me/news', [ClientController::class, 'news'], ['auth']);
 $router->get('/api/v1/me/media', [ClientController::class, 'media'], ['auth']);
 
 $router->get('/api/v1/me/finance', [ClientController::class, 'finance'], ['auth']);
+
+$router->get('/api/v1/me/classes', [ClientController::class, 'classes'], ['auth']);
+
+$router->get('/api/v1/me/matches', [ClientController::class, 'matches'], ['auth']);
+
+$router->get('/api/v1/me/chat-contacts', [ClientController::class, 'chatContacts'], ['auth']);

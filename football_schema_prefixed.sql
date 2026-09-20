@@ -47,17 +47,18 @@ CREATE TABLE IF NOT EXISTS football_user_tokens (
     FOREIGN KEY (user_id) REFERENCES football_users(id) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- سرپرست = فقط رکورد تماس (بدون حساب کاربری)؛ هر بازیکن حداکثر یک سرپرست فعال دارد
 CREATE TABLE IF NOT EXISTS football_guardians (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    user_id BIGINT UNSIGNED NOT NULL,
+    full_name VARCHAR(150) NOT NULL,
+    mobile VARCHAR(20) NULL,
+    national_code CHAR(10) NULL,
     address VARCHAR(500) NULL,
     emergency_phone VARCHAR(20) NULL,
     notes TEXT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
-    UNIQUE KEY uq_football_guardians_user_id (user_id),
-    FOREIGN KEY (user_id) REFERENCES football_users(id) ON DELETE CASCADE ON UPDATE CASCADE
+    PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS football_coaches (
@@ -92,7 +93,6 @@ CREATE TABLE IF NOT EXISTS football_seasons (
 
 CREATE TABLE IF NOT EXISTS football_age_groups (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    season_id BIGINT UNSIGNED NOT NULL,
     title VARCHAR(100) NOT NULL,
     birth_date_from DATE NOT NULL,
     birth_date_to DATE NOT NULL,
@@ -103,17 +103,17 @@ CREATE TABLE IF NOT EXISTS football_age_groups (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    KEY idx_football_age_groups_season_id (season_id),
     KEY idx_football_age_groups_status (status),
-    KEY idx_football_age_groups_birth_dates (birth_date_from, birth_date_to),
-    FOREIGN KEY (season_id) REFERENCES football_seasons(id) ON DELETE RESTRICT ON UPDATE CASCADE
+    KEY idx_football_age_groups_birth_dates (birth_date_from, birth_date_to)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS football_players (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    user_id BIGINT UNSIGNED NULL, -- حساب ورود بازیکن (نقش player) — شناسه ورود = کد ملی
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100) NOT NULL,
     national_code CHAR(10) NULL,
+    password_hash VARCHAR(255) NULL, -- رمز هش‌شده ورود بازیکن (NULL = بدون امکان ورود)
     birth_date DATE NOT NULL,
     gender VARCHAR(10) NULL,
     avatar_path VARCHAR(500) NULL,
@@ -127,9 +127,11 @@ CREATE TABLE IF NOT EXISTS football_players (
     deleted_seq BIGINT UNSIGNED NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     UNIQUE KEY uq_football_players_national_code (national_code, deleted_seq),
+    UNIQUE KEY uq_football_players_user_id (user_id),
     KEY idx_football_players_birth_date (birth_date),
     KEY idx_football_players_status (status),
     KEY idx_football_players_created_by (created_by),
+    FOREIGN KEY (user_id) REFERENCES football_users(id) ON DELETE SET NULL ON UPDATE CASCADE,
     FOREIGN KEY (created_by) REFERENCES football_users(id) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -586,9 +588,11 @@ CREATE TABLE IF NOT EXISTS football_chat_rooms (
     room_type VARCHAR(30) NOT NULL,
     player_id BIGINT UNSIGNED NULL,
     class_id BIGINT UNSIGNED NULL,
+    age_group_id BIGINT UNSIGNED NULL,
     subject VARCHAR(255) NULL,
     unique_key CHAR(64) NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'active',
+    is_locked TINYINT(1) NOT NULL DEFAULT 0,
     created_by BIGINT UNSIGNED NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
@@ -596,10 +600,12 @@ CREATE TABLE IF NOT EXISTS football_chat_rooms (
     UNIQUE KEY uq_football_chat_rooms_unique_key (unique_key),
     KEY idx_football_chat_rooms_player_id (player_id),
     KEY idx_football_chat_rooms_class_id (class_id),
+    KEY idx_football_chat_rooms_age_group_id (age_group_id),
     KEY idx_football_chat_rooms_created_by (created_by),
     KEY idx_football_chat_rooms_type_status (room_type, status),
     FOREIGN KEY (player_id) REFERENCES football_players(id) ON DELETE SET NULL ON UPDATE CASCADE,
     FOREIGN KEY (class_id) REFERENCES football_classes(id) ON DELETE SET NULL ON UPDATE CASCADE,
+    FOREIGN KEY (age_group_id) REFERENCES football_age_groups(id) ON DELETE SET NULL ON UPDATE CASCADE,
     FOREIGN KEY (created_by) REFERENCES football_users(id) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
