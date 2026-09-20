@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Core\AppException;
 use App\Core\Config;
 use App\Core\Request;
+use App\Repositories\PlayerRepository;
 use App\Repositories\UserRepository;
 use App\Repositories\UserTokenRepository;
 
@@ -23,7 +24,11 @@ class AuthService
 
         $user = UserRepository::findByIdentifier($identifier);
 
-        if (!$user || !password_verify($password, $user['password_hash'])) {
+        // رمز ورود: برای بازیکن روی رکورد خود بازیکن (football_players.password_hash)،
+        // برای سایر نقش‌ها روی حساب کاربری (football_users.password_hash)
+        $passwordHash = $user ? self::loginPasswordHash($user) : null;
+
+        if ($passwordHash === null || !password_verify($password, $passwordHash)) {
             throw new AppException('نام کاربری یا رمز عبور اشتباه است', 401);
         }
 
@@ -66,6 +71,22 @@ class AuthService
         ];
     }
 
+    /**
+     * هش رمز ورود کاربر:
+     * بازیکن → ستون password_hash رکورد خود بازیکن (بازیکن حذف‌شده یا بدون رمز → null = ورود ناموفق)
+     * سایر نقش‌ها → football_users.password_hash
+     */
+    private static function loginPasswordHash(array $user): ?string
+    {
+        if (($user['role'] ?? '') !== 'player') {
+            return $user['password_hash'] ?? null;
+        }
+
+        $player = PlayerRepository::findByUserId((int) $user['id']);
+
+        return $player['password_hash'] ?? null;
+    }
+
     public static function changePassword(int $userId, int $currentTokenId, array $data): void
     {
         $user = UserRepository::findById($userId);
@@ -81,7 +102,9 @@ class AuthService
             throw new AppException('رمز عبور فعلی و جدید الزامی است', 422);
         }
 
-        if (!password_verify($oldPassword, $user['password_hash'])) {
+        $currentHash = self::loginPasswordHash($user);
+
+        if ($currentHash === null || !password_verify($oldPassword, $currentHash)) {
             throw new AppException('رمز عبور فعلی اشتباه است', 400);
         }
 
@@ -97,6 +120,11 @@ class AuthService
 
         UserRepository::updatePassword($userId, $newPasswordHash);
         UserRepository::clearMustChangePassword($userId);
+
+        // بازیکن: رمز روی رکورد خود بازیکن (منبع اصلی رمز بازیکن) هم همگام می‌شود
+        if (($user['role'] ?? '') === 'player') {
+            PlayerRepository::updatePasswordByUserId($userId, $newPasswordHash);
+        }
 
         UserTokenRepository::revokeAllForUserExcept($userId, $currentTokenId);
     }

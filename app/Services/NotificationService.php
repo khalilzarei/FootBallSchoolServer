@@ -11,7 +11,7 @@ use App\Repositories\NotificationRepository;
 class NotificationService
 {
     private const TYPES = ['info', 'news', 'payment', 'attendance', 'chat', 'match', 'system'];
-    private const ROLES = ['admin', 'coach', 'guardian'];
+    private const ROLES = ['admin', 'coach', 'player'];
 
     public static function listForCurrentUser(array $query): array
     {

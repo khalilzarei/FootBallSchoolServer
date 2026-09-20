@@ -22,6 +22,48 @@ class AttendanceService
         return AttendanceRepository::listForSession($sessionId);
     }
 
+    /**
+     * برگه حضور و غیاب: لیست بازیکنان ثبت‌نام‌شده کلاس + وضعیت ذخیره‌شده، در یک پاسخ
+     */
+    public static function sheet(int $sessionId): array
+    {
+        $session = self::requireSession($sessionId);
+        $classId = (int) $session['class_id'];
+
+        $players = AttendanceRepository::listSheetPlayers($classId);
+        $attendances = AttendanceRepository::listForSession($sessionId);
+
+        $byPlayer = [];
+        foreach ($attendances as $a) {
+            $byPlayer[(int) $a['player_id']] = $a;
+        }
+
+        $rows = [];
+        foreach ($players as $p) {
+            $playerId = (int) $p['player_id'];
+            $a = $byPlayer[$playerId] ?? null;
+
+            $rows[] = [
+                'player_id' => $playerId,
+                'first_name' => $p['first_name'],
+                'last_name' => $p['last_name'],
+                'full_name' => trim($p['first_name'] . ' ' . $p['last_name']),
+                'avatar_path' => $p['avatar_path'],
+                'avatar_url' => AvatarService::getAvatarUrl($p['avatar_path'] ?? null, 'player'),
+                'status' => $a['status'] ?? null,
+                'is_billable' => $a !== null ? (bool) $a['is_billable'] : null,
+                'note' => $a['note'] ?? null,
+                'recorded_at' => $a['recorded_at'] ?? null,
+            ];
+        }
+
+        return [
+            'session_id' => $sessionId,
+            'class_id' => $classId,
+            'players' => $rows,
+        ];
+    }
+
     public static function saveBulk(int $sessionId, array $items): array
     {
         $session = self::requireSession($sessionId);

@@ -13,7 +13,7 @@ class NewsService
 {
     private const STATUSES = ['draft', 'published', 'archived'];
     private const AUDIENCE_TYPES = ['global', 'role', 'class', 'age_group', 'player'];
-    private const ROLES = ['admin', 'coach', 'guardian'];
+    private const ROLES = ['admin', 'coach', 'player'];
 
     public static function list(array $query): array
     {

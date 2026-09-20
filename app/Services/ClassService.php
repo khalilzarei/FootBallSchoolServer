@@ -9,6 +9,8 @@ use App\Core\Auth;
 use App\Repositories\AgeGroupRepository;
 use App\Repositories\ClassRepository;
 use App\Repositories\CoachRepository;
+use App\Repositories\EnrollmentRepository;
+use App\Repositories\SeasonRepository;
 use DateTime;
 
 class ClassService
@@ -48,17 +50,18 @@ class ClassService
         $title = trim((string) ($data['title'] ?? ''));
         if ($title === '') throw new AppException('عنوان کلاس الزامی است', 422);
 
-        $pricingType = (string) ($data['pricing_type'] ?? 'monthly');
+        $pricingType = trim((string) ($data['pricing_type'] ?? '')) ?: 'monthly';
         if (!in_array($pricingType, self::PRICING_TYPES, true)) throw new AppException('نوع شهریه معتبر نیست', 422);
 
         $status = (string) ($data['status'] ?? 'active');
         if (!in_array($status, self::STATUSES, true)) throw new AppException('وضعیت کلاس معتبر نیست', 422);
 
+        $seasonId = self::normalizeOptionalInt($data['season_id'] ?? null);
         $ageGroupId = self::normalizeOptionalInt($data['age_group_id'] ?? null);
         $coachId = self::normalizeOptionalInt($data['coach_id'] ?? null);
         $assistantCoachId = self::normalizeOptionalInt($data['assistant_coach_id'] ?? null);
 
-        self::assertReferences($ageGroupId, $coachId, $assistantCoachId);
+        self::assertReferences($ageGroupId, $coachId, $assistantCoachId, $seasonId);
 
         $capacity = self::normalizeCapacity($data['capacity'] ?? null);
         $monthlyFee = self::normalizeFee($data['monthly_fee'] ?? null);
@@ -71,6 +74,7 @@ class ClassService
 
         $classId = ClassRepository::create([
             'title' => $title,
+            'season_id' => $seasonId,
             'age_group_id' => $ageGroupId,
             'coach_id' => $coachId,
             'assistant_coach_id' => $assistantCoachId,
@@ -113,7 +117,7 @@ class ClassService
             $updateData['status'] = $v;
         }
 
-        foreach (['age_group_id', 'coach_id', 'assistant_coach_id'] as $f) {
+        foreach (['season_id', 'age_group_id', 'coach_id', 'assistant_coach_id'] as $f) {
             if (array_key_exists($f, $data)) $updateData[$f] = self::normalizeOptionalInt($data[$f]);
         }
 
@@ -140,8 +144,9 @@ class ClassService
         $fag = $updateData['age_group_id'] ?? ($class['age_group_id'] !== null ? (int) $class['age_group_id'] : null);
         $fc = $updateData['coach_id'] ?? ($class['coach_id'] !== null ? (int) $class['coach_id'] : null);
         $fac = $updateData['assistant_coach_id'] ?? ($class['assistant_coach_id'] !== null ? (int) $class['assistant_coach_id'] : null);
+        $fsn = $updateData['season_id'] ?? ($class['season_id'] !== null ? (int) $class['season_id'] : null);
 
-        self::assertReferences($fag, $fc, $fac);
+        self::assertReferences($fag, $fc, $fac, $fsn);
 
         $fs = $updateData['start_date'] ?? $class['start_date'];
         $fe = $updateData['end_date'] ?? $class['end_date'];
@@ -164,6 +169,17 @@ class ClassService
         self::requireClass($id);
         ClassRepository::setStatus($id, 'inactive');
         return self::requireClass($id);
+    }
+
+    public static function delete(int $id): void
+    {
+        self::requireClass($id);
+
+        if (EnrollmentRepository::activeCount($id) > 0) {
+            throw new AppException('این کلاس دارای ثبت‌نام فعال است؛ ابتدا ثبت‌نام‌ها را پایان دهید', 409);
+        }
+
+        ClassRepository::softDelete($id);
     }
 
     private static function requireClass(int $id): array
@@ -214,8 +230,9 @@ class ClassService
         if (new DateTime($end) < new DateTime($start)) throw new AppException('تاریخ پایان نمی‌تواند قبل از شروع باشد', 422);
     }
 
-    private static function assertReferences(?int $ageGroupId, ?int $coachId, ?int $assistantCoachId): void
+    private static function assertReferences(?int $ageGroupId, ?int $coachId, ?int $assistantCoachId, ?int $seasonId = null): void
     {
+        if ($seasonId !== null && !SeasonRepository::findById($seasonId)) throw new AppException('فصل یافت نشد', 404);
         if ($ageGroupId !== null && !AgeGroupRepository::findById($ageGroupId)) throw new AppException('گروه سنی یافت نشد', 404);
         if ($coachId !== null && !CoachRepository::findById($coachId)) throw new AppException('مربی یافت نشد', 404);
         if ($assistantCoachId !== null && !CoachRepository::findById($assistantCoachId)) throw new AppException('مربی دستیار یافت نشد', 404);

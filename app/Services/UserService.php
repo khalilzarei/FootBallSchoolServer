@@ -11,7 +11,7 @@ use App\Services\AvatarService; // ← ایمپورت سرویس آواتار
 
 class UserService
 {
-    private const ROLES = ['admin', 'coach', 'guardian'];
+    private const ROLES = ['admin', 'coach'];
     private const STATUSES = ['active', 'inactive'];
 
     public static function list(array $query): array
@@ -84,8 +84,6 @@ class UserService
         $pdo = \App\Core\Database::connection();
         if ($role === 'coach') {
             $pdo->prepare('INSERT INTO football_coaches (user_id) VALUES (:user_id)')->execute(['user_id' => $userId]);
-        } elseif ($role === 'guardian') {
-            $pdo->prepare('INSERT INTO football_guardians (user_id) VALUES (:user_id)')->execute(['user_id' => $userId]);
         }
 
         $result = self::sanitize(UserRepository::findById($userId));

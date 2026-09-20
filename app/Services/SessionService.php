@@ -154,8 +154,24 @@ class SessionService
         if (!$class) throw new AppException('کلاس یافت نشد', 404);
         if ($class['status'] !== 'active') throw new AppException('جلسات فقط برای کلاس فعال قابل تولید هستند', 422);
 
+        // ─── بازه تولید: اختیاری ───
+        // پیش‌فرض «از» = تاریخ شروع کلاس اگر در آینده باشد، وگرنه امروز
+        // پیش‌فرض «تا» = تاریخ پایان کلاس
         $from = trim((string) ($data['from_date'] ?? ''));
         $to = trim((string) ($data['to_date'] ?? ''));
+
+        if ($from === '') {
+            $today = date('Y-m-d');
+            $classStart = (string) ($class['start_date'] ?? '');
+            $from = ($classStart !== '' && $classStart > $today) ? $classStart : $today;
+        }
+
+        if ($to === '') {
+            $to = (string) ($class['end_date'] ?? '');
+            if ($to === '') {
+                throw new AppException('تاریخ پایان کلاس مشخص نیست؛ ابتدا در ویرایش کلاس تاریخ پایان را وارد کنید یا بازه را دستی انتخاب کنید', 422);
+            }
+        }
 
         self::validateDate($from);
         self::validateDate($to);
@@ -196,7 +212,7 @@ class SessionService
                     'location' => $schedule['location'] ?? $class['location'],
                     'status' => 'scheduled',
                     'topic' => null,
-                    'notes' => 'تولیدشده از برنامه هفتگی',
+                    'notes' => null,
                     'created_by' => Auth::id(),
                 ]);
 

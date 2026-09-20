@@ -17,7 +17,7 @@ class EnrollmentService
 
     public static function listForClass(int $classId, array $query): array
     {
-        self::requireClass($classId);
+        $class = self::requireClass($classId);
 
         $page = max(1, (int) ($query['page'] ?? 1));
         $perPage = (int) ($query['per_page'] ?? 20);
@@ -29,15 +29,88 @@ class EnrollmentService
 
         if ($status !== '' && !in_array($status, self::STATUSES, true)) throw new AppException('وضعیت معتبر نیست', 422);
 
-        return EnrollmentRepository::paginateForClass($classId, [
+        $result = EnrollmentRepository::paginateForClass($classId, [
             'status' => $status !== '' ? $status : null,
             'q' => $q !== '' ? $q : null,
         ], $page, $perPage);
+
+        // پیوست شیء کلاس (سبک، بدون schedules) به همه آیتم‌ها — همه ثبت‌نام‌های یک کلاس‌اند
+        $classLight = $class;
+        unset($classLight['schedules']);
+
+        foreach ($result['items'] as &$item) {
+            $item['class'] = $classLight;
+        }
+        unset($item);
+
+        return $result;
     }
 
     public static function get(int $enrollmentId): array
     {
         return self::requireEnrollment($enrollmentId);
+    }
+
+    /**
+     * ثبت‌نام گروهی: همه بازیکنان فعالِ گروه سنیِ خودِ کلاس
+     * (کلاس‌های فوق‌العاده که گروه سنی ندارند، این متد را قبول نمی‌کنند)
+     */
+    public static function enrollAgeGroup(int $classId): array
+    {
+        $class = self::requireClass($classId);
+
+        if ($class['status'] !== 'active') throw new AppException('ثبت‌نام فقط در کلاس فعال امکان‌پذیر است', 422);
+
+        $ageGroupId = $class['age_group_id'] !== null ? (int) $class['age_group_id'] : null;
+
+        if ($ageGroupId === null) {
+            throw new AppException('این کلاس فوق‌العاده است و گروه سنی ندارد؛ بازیکنان را به‌صورت تکی ثبت‌نام کنید', 422);
+        }
+
+        $playerIds = EnrollmentRepository::activePlayerIdsByAgeGroup($ageGroupId);
+        $total = count($playerIds);
+
+        $capacity = $class['capacity'] !== null ? (int) $class['capacity'] : null;
+        $today = date('Y-m-d');
+
+        $created = 0;
+        $skippedExisting = 0;
+        $skippedCapacity = 0;
+
+        foreach ($playerIds as $playerId) {
+            if (EnrollmentRepository::findActiveOrPending($classId, $playerId) !== null) {
+                $skippedExisting++;
+                continue;
+            }
+
+            if ($capacity !== null && EnrollmentRepository::activeCount($classId) >= $capacity) {
+                $skippedCapacity++;
+                continue;
+            }
+
+            EnrollmentRepository::create([
+                'class_id' => $classId,
+                'player_id' => $playerId,
+                'status' => 'active',
+                'enrolled_at' => $today,
+                'ended_at' => null,
+                'monthly_fee_override' => null,
+                'session_fee_override' => null,
+                'registration_fee_override' => null,
+                'notes' => 'ثبت‌نام گروهی بر اساس گروه سنی',
+                'created_by' => Auth::id(),
+            ]);
+
+            $created++;
+        }
+
+        return [
+            'age_group_id' => $ageGroupId,
+            'total_players' => $total,
+            'created' => $created,
+            'skipped_existing' => $skippedExisting,
+            'skipped_capacity' => $skippedCapacity,
+        ];
     }
 
     public static function create(int $classId, array $data): array

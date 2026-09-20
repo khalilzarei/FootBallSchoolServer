@@ -6,7 +6,6 @@ namespace App\Services;
 
 use App\Core\AppException;
 use App\Repositories\AgeGroupRepository;
-use App\Repositories\SeasonRepository;
 use DateTime;
 
 class AgeGroupService
@@ -20,14 +19,12 @@ class AgeGroupService
         if ($perPage < 1) $perPage = 20;
         if ($perPage > 100) $perPage = 100;
 
-        $seasonId = (int) ($query['season_id'] ?? 0);
         $status = trim((string) ($query['status'] ?? ''));
         $q = trim((string) ($query['q'] ?? ''));
 
         if ($status !== '' && !in_array($status, self::STATUSES, true)) throw new AppException('وضعیت معتبر نیست', 422);
 
         return AgeGroupRepository::paginate([
-            'season_id' => $seasonId > 0 ? $seasonId : null,
             'status' => $status !== '' ? $status : null,
             'q' => $q !== '' ? $q : null,
         ], $page, $perPage);
@@ -38,13 +35,18 @@ class AgeGroupService
         return self::requireAgeGroup($id);
     }
 
+    /**
+     * بازیکنان عضو گروه سنی (بر اساس بازه تاریخ تولد)
+     */
+    public static function players(int $id): array
+    {
+        self::requireAgeGroup($id);
+
+        return AgeGroupRepository::playersForAgeGroup($id);
+    }
+
     public static function create(array $data): array
     {
-        $seasonId = (int) ($data['season_id'] ?? 0);
-        if ($seasonId <= 0) throw new AppException('شناسه فصل معتبر نیست', 422);
-
-        if (!SeasonRepository::findById($seasonId)) throw new AppException('فصل یافت نشد', 404);
-
         $title = trim((string) ($data['title'] ?? ''));
         if ($title === '') throw new AppException('عنوان گروه سنی الزامی است', 422);
 
@@ -55,7 +57,7 @@ class AgeGroupService
         self::validateDate($to);
         self::validateBirthRange($from, $to);
 
-        if (AgeGroupRepository::hasOverlap($seasonId, $from, $to)) {
+        if (AgeGroupRepository::hasOverlap($from, $to)) {
             throw new AppException('بازه تاریخی با گروه سنی فعال دیگر تداخل دارد', 422);
         }
 
@@ -63,7 +65,6 @@ class AgeGroupService
         if (!in_array($status, self::STATUSES, true)) throw new AppException('وضعیت معتبر نیست', 422);
 
         $ageGroupId = AgeGroupRepository::create([
-            'season_id' => $seasonId,
             'title' => $title,
             'birth_date_from' => $from,
             'birth_date_to' => $to,
@@ -80,12 +81,6 @@ class AgeGroupService
     {
         $ageGroup = self::requireAgeGroup($id);
         $updateData = [];
-
-        if (array_key_exists('season_id', $data)) {
-            $v = (int) $data['season_id'];
-            if ($v <= 0) throw new AppException('شناسه فصل معتبر نیست', 422);
-            $updateData['season_id'] = $v;
-        }
 
         if (array_key_exists('title', $data)) {
             $v = trim((string) $data['title']);
@@ -117,15 +112,12 @@ class AgeGroupService
             $updateData['status'] = $v;
         }
 
-        $fs = $updateData['season_id'] ?? (int) $ageGroup['season_id'];
         $ff = $updateData['birth_date_from'] ?? $ageGroup['birth_date_from'];
         $ft = $updateData['birth_date_to'] ?? $ageGroup['birth_date_to'];
 
-        if (!SeasonRepository::findById($fs)) throw new AppException('فصل یافت نشد', 404);
-
         self::validateBirthRange($ff, $ft);
 
-        if (AgeGroupRepository::hasOverlap($fs, $ff, $ft, $id)) {
+        if (AgeGroupRepository::hasOverlap($ff, $ft, $id)) {
             throw new AppException('بازه تاریخی تداخل دارد', 422);
         }
 
