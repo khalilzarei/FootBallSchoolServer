@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Repositories;
 
 use App\Core\Database;
+use App\Services\AvatarService;
 
 class CoachRepository
 {
@@ -43,7 +44,8 @@ class CoachRepository
 
         $stmt = $pdo->prepare("
             SELECT c.*, u.full_name AS user_full_name, u.mobile AS user_mobile,
-                   u.national_code AS user_national_code, u.status AS user_status
+                   u.national_code AS user_national_code, u.status AS user_status,
+                   u.avatar_path AS user_avatar_path
             FROM football_coaches c
             INNER JOIN football_users u ON u.id = c.user_id
             WHERE {$whereSql}
@@ -53,7 +55,7 @@ class CoachRepository
         $stmt->execute($params);
 
         return [
-            'items' => $stmt->fetchAll(),
+            'items' => array_map(static fn (array $row): array => self::hydrate($row), $stmt->fetchAll()),
             'total' => $total,
             'page' => $page,
             'per_page' => $perPage,
@@ -66,7 +68,8 @@ class CoachRepository
 
         $stmt = $pdo->prepare('
             SELECT c.*, u.full_name AS user_full_name, u.mobile AS user_mobile,
-                   u.national_code AS user_national_code, u.status AS user_status
+                   u.national_code AS user_national_code, u.status AS user_status,
+                   u.avatar_path AS user_avatar_path
             FROM football_coaches c
             INNER JOIN football_users u ON u.id = c.user_id
             WHERE c.id = :id AND u.deleted_at IS NULL
@@ -76,7 +79,29 @@ class CoachRepository
         $stmt->execute(['id' => $id]);
         $coach = $stmt->fetch();
 
-        return $coach ?: null;
+        return $coach ? self::hydrate($coach) : null;
+    }
+
+    /**
+     * ساخت شیء تو در توی user که اپ اندروید (CoachDto) انتظار دارد
+     */
+    private static function hydrate(array $coach): array
+    {
+        $coach['id'] = (int) $coach['id'];
+        $coach['user_id'] = (int) $coach['user_id'];
+        $coach['is_active'] = ((string) ($coach['user_status'] ?? '')) === 'active';
+
+        $coach['user'] = [
+            'id' => (int) $coach['user_id'],
+            'full_name' => (string) ($coach['user_full_name'] ?? ''),
+            'mobile' => $coach['user_mobile'] ?? null,
+            'national_code' => $coach['user_national_code'] ?? null,
+            'role' => 'coach',
+            'status' => (string) ($coach['user_status'] ?? 'active'),
+            'avatar_url' => AvatarService::getAvatarUrl($coach['user_avatar_path'] ?? null, 'user'),
+        ];
+
+        return $coach;
     }
 
     public static function findByUserId(int $userId): ?array

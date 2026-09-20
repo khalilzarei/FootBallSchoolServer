@@ -93,7 +93,8 @@ class PlayerRepository
             'national_code' => $data['national_code'] ?? null,
             'birth_date' => $data['birth_date'],
             'gender' => $data['gender'] ?? null,
-            'avatar_path' => $data['avatar_path'] ?? null, // ← پشتیبانی از آواتار
+            // رشته خالی به‌جای null — برخی دیتابیس‌ها (هاست) این ستون را NOT NULL تعریف کرده‌اند
+            'avatar_path' => $data['avatar_path'] ?? '', // ← پشتیبانی از آواتار
             'medical_notes' => $data['medical_notes'] ?? null,
             'status' => $data['status'] ?? 'active',
             'notes' => $data['notes'] ?? null,
@@ -111,7 +112,7 @@ class PlayerRepository
         // اضافه شدن avatar_path به لیست فیلدهای مجاز
         $allowedFields = [
             'first_name', 'last_name', 'national_code', 'birth_date', 
-            'avatar_path', 'gender', 'medical_notes', 'status', 'notes'
+            'avatar_path', 'gender', 'medical_notes', 'status', 'notes', 'user_id', 'password_hash'
         ];
 
         foreach ($allowedFields as $field) {
@@ -128,10 +129,28 @@ class PlayerRepository
         $stmt->execute($params);
     }
 
+    /** بازیکنِ متصل به این حساب کاربری (برای ورود و رمز) */
+    public static function findByUserId(int $userId): ?array
+    {
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare('SELECT * FROM football_players WHERE user_id = :user_id AND deleted_at IS NULL LIMIT 1');
+        $stmt->execute(['user_id' => $userId]);
+        return $stmt->fetch() ?: null;
+    }
+
+    /** همگام‌سازی رمز بازیکن (تغییر رمز از داخل اپ) */
+    public static function updatePasswordByUserId(int $userId, string $passwordHash): void
+    {
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare('UPDATE football_players SET password_hash = :hash, updated_at = NOW() WHERE user_id = :user_id');
+        $stmt->execute(['hash' => $passwordHash, 'user_id' => $userId]);
+    }
+
     public static function updateAvatar(int $id, ?string $avatarPath): void
     {
         $pdo = Database::connection();
         $stmt = $pdo->prepare('UPDATE football_players SET avatar_path = :avatar_path, updated_at = NOW() WHERE id = :id AND deleted_at IS NULL');
-        $stmt->execute(['id' => $id, 'avatar_path' => $avatarPath]);
+        // رشته خالی به‌جای null (سازگاری با ستون NOT NULL در برخی هاست‌ها)
+        $stmt->execute(['id' => $id, 'avatar_path' => $avatarPath ?? '']);
     }
 }

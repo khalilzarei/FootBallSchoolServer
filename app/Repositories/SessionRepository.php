@@ -44,7 +44,7 @@ class SessionRepository
         $offset = ($page - 1) * $perPage;
 
         $stmt = $pdo->prepare("
-            SELECT s.*, c.title AS class_title
+            SELECT s.*, c.title AS class_title, c.status AS class_status
             FROM football_sessions s
             INNER JOIN football_classes c ON c.id = s.class_id
             WHERE {$whereSql}
@@ -54,7 +54,7 @@ class SessionRepository
         $stmt->execute($params);
 
         return [
-            'items' => $stmt->fetchAll(),
+            'items' => array_map(static fn (array $row): array => self::hydrate($row), $stmt->fetchAll()),
             'total' => $total,
             'page' => $page,
             'per_page' => $perPage,
@@ -66,7 +66,7 @@ class SessionRepository
         $pdo = Database::connection();
 
         $stmt = $pdo->prepare('
-            SELECT s.*, c.title AS class_title
+            SELECT s.*, c.title AS class_title, c.status AS class_status
             FROM football_sessions s
             INNER JOIN football_classes c ON c.id = s.class_id
             WHERE s.id = :id
@@ -76,7 +76,26 @@ class SessionRepository
         $stmt->execute(['id' => $id]);
         $session = $stmt->fetch();
 
-        return $session ?: null;
+        return $session ? self::hydrate($session) : null;
+    }
+
+    /**
+     * افزودن شیء کلاس سبک + is_active به ردیف جلسه
+     * (SessionDto اپ اندروید فیلد class و is_active را انتظار دارد)
+     */
+    private static function hydrate(array $row): array
+    {
+        $row['id'] = (int) $row['id'];
+        $row['class_id'] = (int) $row['class_id'];
+
+        $row['class'] = [
+            'id' => (int) $row['class_id'],
+            'title' => (string) ($row['class_title'] ?? ''),
+            'status' => (string) ($row['class_status'] ?? 'active'),
+            'is_active' => ((string) ($row['class_status'] ?? '')) === 'active',
+        ];
+
+        return $row;
     }
 
     public static function exists(int $classId, string $date, string $startTime, ?int $exceptId = null): bool

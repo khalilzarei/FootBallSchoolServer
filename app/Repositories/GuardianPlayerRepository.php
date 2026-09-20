@@ -109,19 +109,48 @@ class GuardianPlayerRepository
         $pdo = Database::connection();
 
         $stmt = $pdo->prepare('
-            SELECT g.id AS guardian_id, g.user_id, g.address, g.emergency_phone,
+            SELECT gp.player_id, g.id AS guardian_id, g.emergency_phone,
                    gp.relation, gp.is_primary, gp.can_view_reports, gp.can_pay,
                    gp.status AS relation_status,
-                   u.full_name AS user_full_name, u.mobile AS user_mobile,
-                   u.national_code AS user_national_code, u.status AS user_status
+                   g.full_name AS user_full_name, g.mobile AS user_mobile,
+                   g.national_code AS user_national_code
             FROM football_guardians_players gp
             INNER JOIN football_guardians g ON g.id = gp.guardian_id
-            INNER JOIN football_users u ON u.id = g.user_id
-            WHERE gp.player_id = :player_id AND gp.status = "active" AND u.deleted_at IS NULL
+            WHERE gp.player_id = :player_id AND gp.status = "active"
             ORDER BY gp.id DESC
         ');
 
         $stmt->execute(['player_id' => $playerId]);
+
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * سرپرستان فعال چند بازیکن — برای دکمه‌های تماس/پیام در لیست بازیکنان
+     * (سرپرست اصلی اول برمی‌گردد)
+     */
+    public static function guardiansForPlayers(array $playerIds): array
+    {
+        if (empty($playerIds)) {
+            return [];
+        }
+
+        $pdo = Database::connection();
+
+        $ids = implode(',', array_map('intval', $playerIds));
+
+        $stmt = $pdo->prepare("
+            SELECT gp.player_id, gp.relation, gp.is_primary, gp.can_view_reports, gp.can_pay,
+                   g.id AS guardian_id, g.emergency_phone,
+                   g.full_name AS user_full_name, g.mobile AS user_mobile,
+                   g.national_code AS user_national_code
+            FROM football_guardians_players gp
+            INNER JOIN football_guardians g ON g.id = gp.guardian_id
+            WHERE gp.player_id IN ({$ids}) AND gp.status = \"active\"
+            ORDER BY gp.is_primary DESC, gp.id ASC
+        ");
+
+        $stmt->execute();
 
         return $stmt->fetchAll();
     }

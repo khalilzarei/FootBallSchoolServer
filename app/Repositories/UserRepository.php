@@ -119,7 +119,8 @@ class UserRepository
             'full_name' => $data['full_name'],
             'mobile' => $data['mobile'] ?? null,
             'national_code' => $data['national_code'] ?? null,
-            'avatar_path' => $data['avatar_path'] ?? null, // پشتیبانی از آواتار
+            // رشته خالی به‌جای null — برخی دیتابیس‌ها (هاست) این ستون را NOT NULL تعریف کرده‌اند
+            'avatar_path' => $data['avatar_path'] ?? '', // پشتیبانی از آواتار
             'password_hash' => $data['password_hash'],
             'role' => $data['role'],
             'status' => $data['status'] ?? 'active',
@@ -154,7 +155,8 @@ class UserRepository
     {
         $pdo = Database::connection();
         $stmt = $pdo->prepare('UPDATE football_users SET avatar_path = :avatar_path, updated_at = NOW() WHERE id = :id AND deleted_at IS NULL');
-        $stmt->execute(['id' => $id, 'avatar_path' => $avatarPath]);
+        // رشته خالی به‌جای null (سازگاری با ستون NOT NULL در برخی هاست‌ها)
+        $stmt->execute(['id' => $id, 'avatar_path' => $avatarPath ?? '']);
     }
 
     public static function resetPassword(int $id, string $passwordHash): void

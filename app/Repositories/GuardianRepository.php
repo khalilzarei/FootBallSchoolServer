@@ -12,16 +12,11 @@ class GuardianRepository
     {
         $pdo = Database::connection();
 
-        $where = ['u.deleted_at IS NULL', 'u.role = :role'];
-        $params = ['role' => 'guardian'];
-
-        if (!empty($filters['status'])) {
-            $where[] = 'u.status = :status';
-            $params['status'] = $filters['status'];
-        }
+        $where = ['1=1'];
+        $params = [];
 
         if (!empty($filters['q'])) {
-            $where[] = '(u.full_name LIKE :q1 OR u.mobile LIKE :q2 OR u.national_code LIKE :q3)';
+            $where[] = '(g.full_name LIKE :q1 OR g.mobile LIKE :q2 OR g.national_code LIKE :q3)';
             $like = '%' . $filters['q'] . '%';
             $params['q1'] = $like;
             $params['q2'] = $like;
@@ -33,7 +28,6 @@ class GuardianRepository
         $countStmt = $pdo->prepare("
             SELECT COUNT(*) AS total
             FROM football_guardians g
-            INNER JOIN football_users u ON u.id = g.user_id
             WHERE {$whereSql}
         ");
         $countStmt->execute($params);
@@ -42,10 +36,8 @@ class GuardianRepository
         $offset = ($page - 1) * $perPage;
 
         $stmt = $pdo->prepare("
-            SELECT g.*, u.full_name AS user_full_name, u.mobile AS user_mobile,
-                   u.national_code AS user_national_code, u.status AS user_status
+            SELECT g.*
             FROM football_guardians g
-            INNER JOIN football_users u ON u.id = g.user_id
             WHERE {$whereSql}
             ORDER BY g.id DESC
             LIMIT {$perPage} OFFSET {$offset}
@@ -66,11 +58,9 @@ class GuardianRepository
         $pdo = Database::connection();
 
         $stmt = $pdo->prepare('
-            SELECT g.*, u.full_name AS user_full_name, u.mobile AS user_mobile,
-                   u.national_code AS user_national_code, u.status AS user_status
+            SELECT g.*
             FROM football_guardians g
-            INNER JOIN football_users u ON u.id = g.user_id
-            WHERE g.id = :id AND u.deleted_at IS NULL
+            WHERE g.id = :id
             LIMIT 1
         ');
 
@@ -80,15 +70,25 @@ class GuardianRepository
         return $guardian ?: null;
     }
 
-    public static function findByUserId(int $userId): ?array
+    /** ساخت رکورد سرپرست (فقط مشخصات تماس — بدون حساب کاربری) */
+    public static function create(array $data): int
     {
         $pdo = Database::connection();
 
-        $stmt = $pdo->prepare('SELECT * FROM football_guardians WHERE user_id = :user_id LIMIT 1');
-        $stmt->execute(['user_id' => $userId]);
-        $guardian = $stmt->fetch();
+        $stmt = $pdo->prepare('
+            INSERT INTO football_guardians (full_name, mobile, national_code, address, emergency_phone, notes, created_at, updated_at)
+            VALUES (:full_name, :mobile, :national_code, :address, :emergency_phone, :notes, NOW(), NOW())
+        ');
+        $stmt->execute([
+            'full_name' => (string) $data['full_name'],
+            'mobile' => $data['mobile'] ?? null,
+            'national_code' => $data['national_code'] ?? null,
+            'address' => $data['address'] ?? null,
+            'emergency_phone' => $data['emergency_phone'] ?? null,
+            'notes' => $data['notes'] ?? null,
+        ]);
 
-        return $guardian ?: null;
+        return (int) $pdo->lastInsertId();
     }
 
     public static function update(int $id, array $data): void
@@ -98,7 +98,7 @@ class GuardianRepository
         $sets = [];
         $params = ['id' => $id];
 
-        $allowedFields = ['address', 'emergency_phone', 'notes'];
+        $allowedFields = ['full_name', 'mobile', 'national_code', 'address', 'emergency_phone', 'notes'];
 
         foreach ($allowedFields as $field) {
             if (array_key_exists($field, $data)) {

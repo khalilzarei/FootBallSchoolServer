@@ -23,7 +23,15 @@ class AttendanceRepository
 
         $stmt->execute(['session_id' => $sessionId]);
 
-        return $stmt->fetchAll();
+        $rows = $stmt->fetchAll();
+
+        // is_billable از دیتابیس ۰/۱ می‌آید؛ در JSON باید true/false باشد وگرنه Gson اپ می‌شکند
+        foreach ($rows as &$r) {
+            $r['is_billable'] = (bool) $r['is_billable'];
+        }
+        unset($r);
+
+        return $rows;
     }
 
     public static function find(int $sessionId, int $playerId): ?array
@@ -102,6 +110,34 @@ class AttendanceRepository
         ');
 
         $stmt->execute(['player_id' => $playerId]);
+
+        $rows = $stmt->fetchAll();
+
+        foreach ($rows as &$r) {
+            $r['is_billable'] = (bool) $r['is_billable'];
+        }
+        unset($r);
+
+        return $rows;
+    }
+
+    /**
+     * بازیکنان ثبت‌نام‌شده کلاس برای برگه حضور و غیاب
+     * (همان ترتیب لیست «بازیکنان کلاس»: جدیدترین ثبت‌نام اول)
+     */
+    public static function listSheetPlayers(int $classId): array
+    {
+        $pdo = Database::connection();
+
+        $stmt = $pdo->prepare('
+            SELECT e.player_id, p.first_name, p.last_name, p.avatar_path
+            FROM football_enrollments e
+            INNER JOIN football_players p ON p.id = e.player_id
+            WHERE e.class_id = :class_id AND p.deleted_at IS NULL
+            ORDER BY e.id DESC
+        ');
+
+        $stmt->execute(['class_id' => $classId]);
 
         return $stmt->fetchAll();
     }

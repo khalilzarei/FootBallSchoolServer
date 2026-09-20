@@ -34,7 +34,7 @@ class SeasonRepository
         $offset = ($page - 1) * $perPage;
 
         $stmt = $pdo->prepare("
-            SELECT s.*
+            SELECT s.*, (s.status = 'active') AS is_active
             FROM football_seasons s
             WHERE {$whereSql}
             ORDER BY s.id DESC
@@ -43,7 +43,7 @@ class SeasonRepository
         $stmt->execute($params);
 
         return [
-            'items' => $stmt->fetchAll(),
+            'items' => array_map(static fn (array $row): array => self::hydrate($row), $stmt->fetchAll()),
             'total' => $total,
             'page' => $page,
             'per_page' => $perPage,
@@ -54,11 +54,19 @@ class SeasonRepository
     {
         $pdo = Database::connection();
 
-        $stmt = $pdo->prepare('SELECT * FROM football_seasons WHERE id = :id LIMIT 1');
+        $stmt = $pdo->prepare("SELECT s.*, (s.status = 'active') AS is_active FROM football_seasons s WHERE s.id = :id LIMIT 1");
         $stmt->execute(['id' => $id]);
         $season = $stmt->fetch();
 
-        return $season ?: null;
+        return $season ? self::hydrate($season) : null;
+    }
+
+    private static function hydrate(array $row): array
+    {
+        $row['id'] = (int) $row['id'];
+        $row['is_active'] = ((int) ($row['is_active'] ?? 0)) === 1;
+
+        return $row;
     }
 
     public static function create(array $data): int

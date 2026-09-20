@@ -15,11 +15,6 @@ class AgeGroupRepository
         $where = ['ag.id IS NOT NULL'];
         $params = [];
 
-        if (!empty($filters['season_id'])) {
-            $where[] = 'ag.season_id = :season_id';
-            $params['season_id'] = $filters['season_id'];
-        }
-
         if (!empty($filters['status'])) {
             $where[] = 'ag.status = :status';
             $params['status'] = $filters['status'];
@@ -39,9 +34,13 @@ class AgeGroupRepository
         $offset = ($page - 1) * $perPage;
 
         $stmt = $pdo->prepare("
-            SELECT ag.*, s.title AS season_title
+            SELECT ag.*, (ag.status = 'active') AS is_active,
+                (SELECT COUNT(*) FROM football_players p
+                 WHERE p.deleted_at IS NULL
+                   AND p.birth_date IS NOT NULL
+                   AND p.birth_date >= ag.birth_date_from
+                   AND p.birth_date <= ag.birth_date_to) AS players_count
             FROM football_age_groups ag
-            INNER JOIN football_seasons s ON s.id = ag.season_id
             WHERE {$whereSql}
             ORDER BY ag.sort_order ASC, ag.id DESC
             LIMIT {$perPage} OFFSET {$offset}
@@ -49,7 +48,7 @@ class AgeGroupRepository
         $stmt->execute($params);
 
         return [
-            'items' => $stmt->fetchAll(),
+            'items' => array_map(static fn (array $row): array => self::hydrate($row), $stmt->fetchAll()),
             'total' => $total,
             'page' => $page,
             'per_page' => $perPage,
@@ -61,9 +60,13 @@ class AgeGroupRepository
         $pdo = Database::connection();
 
         $stmt = $pdo->prepare('
-            SELECT ag.*, s.title AS season_title
+            SELECT ag.*, (ag.status = \'active\') AS is_active,
+                (SELECT COUNT(*) FROM football_players p
+                 WHERE p.deleted_at IS NULL
+                   AND p.birth_date IS NOT NULL
+                   AND p.birth_date >= ag.birth_date_from
+                   AND p.birth_date <= ag.birth_date_to) AS players_count
             FROM football_age_groups ag
-            INNER JOIN football_seasons s ON s.id = ag.season_id
             WHERE ag.id = :id
             LIMIT 1
         ');
@@ -71,7 +74,52 @@ class AgeGroupRepository
         $stmt->execute(['id' => $id]);
         $ageGroup = $stmt->fetch();
 
-        return $ageGroup ?: null;
+        return $ageGroup ? self::hydrate($ageGroup) : null;
+    }
+
+    private static function hydrate(array $row): array
+    {
+        $row['id'] = (int) $row['id'];
+        $row['sort_order'] = (int) ($row['sort_order'] ?? 0);
+        $row['is_active'] = ((int) ($row['is_active'] ?? 0)) === 1;
+        $row['players_count'] = (int) ($row['players_count'] ?? 0);
+
+        return $row;
+    }
+
+    /**
+     * بازیکنانِ عضو گروه سنی = هر بازیکنی که تاریخ تولدش در بازه گروه باشد
+     * (حذف‌نشده؛ وضعیت هر بازیکن در خروجی موجود است)
+     */
+    public static function playersForAgeGroup(int $ageGroupId): array
+    {
+        $pdo = Database::connection();
+
+        $stmt = $pdo->prepare('
+            SELECT p.id, p.first_name, p.last_name, p.national_code, p.birth_date, p.status,
+                   TIMESTAMPDIFF(YEAR, p.birth_date, CURDATE()) AS age
+            FROM football_players p
+            INNER JOIN football_age_groups ag ON ag.id = :age_group_id
+            WHERE p.deleted_at IS NULL
+              AND p.birth_date IS NOT NULL
+              AND p.birth_date >= ag.birth_date_from
+              AND p.birth_date <= ag.birth_date_to
+            ORDER BY p.first_name ASC, p.last_name ASC, p.id ASC
+        ');
+
+        $stmt->execute(['age_group_id' => $ageGroupId]);
+
+        return array_map(static fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'first_name' => (string) $row['first_name'],
+            'last_name' => (string) $row['last_name'],
+            'full_name' => trim($row['first_name'] . ' ' . $row['last_name']),
+            'national_code' => $row['national_code'],
+            'birth_date' => $row['birth_date'],
+            'age' => (int) $row['age'],
+            'status' => (string) $row['status'],
+            'is_active' => ((string) $row['status']) === 'active',
+        ], $stmt->fetchAll());
     }
 
     public static function create(array $data): int
@@ -80,16 +128,15 @@ class AgeGroupRepository
 
         $stmt = $pdo->prepare('
             INSERT INTO football_age_groups (
-                season_id, title, birth_date_from, birth_date_to,
+                title, birth_date_from, birth_date_to,
                 min_age_at_cutoff, max_age_at_cutoff, sort_order, status, created_at
             ) VALUES (
-                :season_id, :title, :birth_date_from, :birth_date_to,
+                :title, :birth_date_from, :birth_date_to,
                 :min_age_at_cutoff, :max_age_at_cutoff, :sort_order, :status, NOW()
             )
         ');
 
         $stmt->execute([
-            'season_id' => $data['season_id'],
             'title' => $data['title'],
             'birth_date_from' => $data['birth_date_from'],
             'birth_date_to' => $data['birth_date_to'],
@@ -110,7 +157,7 @@ class AgeGroupRepository
         $params = ['id' => $id];
 
         $allowedFields = [
-            'season_id', 'title', 'birth_date_from', 'birth_date_to',
+            'title', 'birth_date_from', 'birth_date_to',
             'min_age_at_cutoff', 'max_age_at_cutoff', 'sort_order', 'status',
         ];
 
@@ -139,18 +186,21 @@ class AgeGroupRepository
         $stmt->execute(['id' => $id, 'status' => $status]);
     }
 
-    public static function hasOverlap(int $seasonId, string $from, string $to, ?int $exceptId = null): bool
+    /**
+     * آیا بازه‌ی تولد با گروه سنی فعال دیگری تداخل دارد؟
+     * (بدون فصل — بازه‌ها در کل مدرسه یکتا هستند)
+     */
+    public static function hasOverlap(string $from, string $to, ?int $exceptId = null): bool
     {
         $pdo = Database::connection();
 
         $sql = '
             SELECT id FROM football_age_groups
-            WHERE season_id = :season_id AND status = "active"
+            WHERE status = "active"
               AND birth_date_from <= :birth_date_to AND birth_date_to >= :birth_date_from
         ';
 
         $params = [
-            'season_id' => $seasonId,
             'birth_date_from' => $from,
             'birth_date_to' => $to,
         ];

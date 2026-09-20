@@ -16,7 +16,7 @@ class ReportRepository
             SELECT COUNT(*) AS total_users,
                    SUM(role = "admin") AS total_admins,
                    SUM(role = "coach") AS total_coaches,
-                   SUM(role = "guardian") AS total_guardians
+                   SUM(role = "player") AS total_guardians
             FROM football_users WHERE status = "active" AND deleted_at IS NULL
         ');
         $stmt->execute();

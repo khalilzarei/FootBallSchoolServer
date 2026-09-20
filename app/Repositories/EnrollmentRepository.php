@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Repositories;
 
 use App\Core\Database;
+use App\Services\AvatarService;
 
 class EnrollmentRepository
 {
@@ -43,7 +44,7 @@ class EnrollmentRepository
 
         $stmt = $pdo->prepare("
             SELECT e.*, p.first_name, p.last_name, p.national_code AS player_national_code,
-                   p.birth_date, p.status AS player_status,
+                   p.avatar_path, p.birth_date AS player_birth_date, p.status AS player_status,
                    TIMESTAMPDIFF(YEAR, p.birth_date, CURDATE()) AS age
             FROM football_enrollments e
             INNER JOIN football_players p ON p.id = e.player_id
@@ -54,7 +55,7 @@ class EnrollmentRepository
         $stmt->execute($params);
 
         return [
-            'items' => $stmt->fetchAll(),
+            'items' => array_map(static fn (array $row): array => self::hydrate($row), $stmt->fetchAll()),
             'total' => $total,
             'page' => $page,
             'per_page' => $perPage,
@@ -66,7 +67,10 @@ class EnrollmentRepository
         $pdo = Database::connection();
 
         $stmt = $pdo->prepare('
-            SELECT e.*, c.title AS class_title, p.first_name, p.last_name,
+            SELECT e.*, c.title AS class_title, c.status AS class_status,
+                   p.first_name, p.last_name, p.avatar_path,
+                   p.national_code AS player_national_code, p.birth_date AS player_birth_date,
+                   p.status AS player_status,
                    TIMESTAMPDIFF(YEAR, p.birth_date, CURDATE()) AS age
             FROM football_enrollments e
             INNER JOIN football_classes c ON c.id = e.class_id
@@ -78,7 +82,45 @@ class EnrollmentRepository
         $stmt->execute(['id' => $id]);
         $enrollment = $stmt->fetch();
 
-        return $enrollment ?: null;
+        return $enrollment ? self::hydrate($enrollment) : null;
+    }
+
+    /**
+     * تبدیل ردیف خام به ساختاری که EnrollmentDto اپ اندروید انتظار دارد:
+     * is_active + شیء تو در توی player (نام کامل، سن و ...)
+     */
+    private static function hydrate(array $row): array
+    {
+        $row['id'] = (int) $row['id'];
+        $row['class_id'] = (int) $row['class_id'];
+        $row['player_id'] = (int) $row['player_id'];
+        $row['is_active'] = ($row['status'] ?? '') === 'active';
+
+        $row['player'] = [
+            'id' => (int) $row['player_id'],
+            'first_name' => (string) ($row['first_name'] ?? ''),
+            'last_name' => (string) ($row['last_name'] ?? ''),
+            'full_name' => trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? '')),
+            'national_code' => $row['player_national_code'] ?? null,
+            'birth_date' => $row['player_birth_date'] ?? null,
+            'age' => $row['age'] !== null ? (int) $row['age'] : null,
+            'status' => (string) ($row['player_status'] ?? 'active'),
+            'is_active' => ((string) ($row['player_status'] ?? '')) === 'active',
+            'avatar_path' => $row['avatar_path'] ?? null,
+            'avatar_url' => AvatarService::getAvatarUrl($row['avatar_path'] ?? null, 'player'),
+        ];
+
+        // کلاس سبک — فقط در findById که به جدول کلاس JOIN شده است
+        if (array_key_exists('class_title', $row)) {
+            $row['class'] = [
+                'id' => (int) $row['class_id'],
+                'title' => (string) ($row['class_title'] ?? ''),
+                'status' => (string) ($row['class_status'] ?? 'active'),
+                'is_active' => ((string) ($row['class_status'] ?? '')) === 'active',
+            ];
+        }
+
+        return $row;
     }
 
     public static function findActiveOrPending(int $classId, int $playerId): ?array
@@ -129,6 +171,32 @@ class EnrollmentRepository
         $stmt->execute(['class_id' => $classId, 'player_id' => $playerId]);
 
         return (bool) $stmt->fetch();
+    }
+
+    /**
+     * شناسه بازیکنان فعالِ یک گروه سنی
+     * عضویت بر اساس بازه تاریخ تولد است: هر بازیکنی که تاریخ تولدش
+     * بین birth_date_from و birth_date_to گروه باشد، عضو این گروه است
+     */
+    public static function activePlayerIdsByAgeGroup(int $ageGroupId): array
+    {
+        $pdo = Database::connection();
+
+        $stmt = $pdo->prepare('
+            SELECT p.id
+            FROM football_players p
+            INNER JOIN football_age_groups ag ON ag.id = :age_group_id
+            WHERE p.deleted_at IS NULL
+              AND p.status = "active"
+              AND p.birth_date IS NOT NULL
+              AND p.birth_date >= ag.birth_date_from
+              AND p.birth_date <= ag.birth_date_to
+            ORDER BY p.id ASC
+        ');
+
+        $stmt->execute(['age_group_id' => $ageGroupId]);
+
+        return array_map(static fn (array $r): int => (int) $r['id'], $stmt->fetchAll());
     }
 
     public static function create(array $data): int
@@ -198,5 +266,88 @@ class EnrollmentRepository
 
         $stmt = $pdo->prepare('UPDATE football_enrollments SET status = :status, updated_at = NOW() WHERE id = :id');
         $stmt->execute(['id' => $id, 'status' => $status]);
+    }
+
+    /**
+     * کلاسِ فعلی (تازه‌ترین ثبت‌نام فعال) هر بازیکن — برای نمایش در لیست/جزئیات بازیکن.
+     * اگر بازیکن در چند کلاس فعال ثبت‌نام شده باشد، تازه‌ترین برمی‌گردد.
+     * خروجی: [player_id => آرایه‌ی کلاس به شکل ClassDto اپ]
+     */
+    public static function currentClassByPlayerIds(array $playerIds): array
+    {
+        if (empty($playerIds)) {
+            return [];
+        }
+
+        $pdo = Database::connection();
+        $ids = implode(',', array_map('intval', $playerIds));
+
+        // تازه‌ترین ثبت‌نام فعال هر بازیکن
+        $stmt = $pdo->prepare("
+            SELECT player_id, class_id
+            FROM football_enrollments
+            WHERE player_id IN ({$ids}) AND status = 'active' AND ended_at IS NULL
+            ORDER BY enrolled_at DESC, id DESC
+        ");
+        $stmt->execute();
+
+        $classIdByPlayer = [];
+        foreach ($stmt->fetchAll() as $r) {
+            $pid = (int) $r['player_id'];
+            if (!isset($classIdByPlayer[$pid])) {
+                $classIdByPlayer[$pid] = (int) $r['class_id'];
+            }
+        }
+
+        if (empty($classIdByPlayer)) {
+            return [];
+        }
+
+        $classIds = implode(',', array_map('intval', array_unique($classIdByPlayer)));
+
+        $stmt = $pdo->prepare("
+            SELECT c.*,
+                (
+                    SELECT COUNT(*) FROM football_enrollments e
+                    WHERE e.class_id = c.id AND e.status = 'active' AND e.ended_at IS NULL
+                ) AS enrolled_count
+            FROM football_classes c
+            WHERE c.id IN ({$classIds})
+        ");
+        $stmt->execute();
+        $classes = [];
+        foreach ($stmt->fetchAll() as $c) {
+            $classes[(int) $c['id']] = $c;
+        }
+
+        $out = [];
+        foreach ($classIdByPlayer as $pid => $cid) {
+            if (!isset($classes[$cid])) {
+                continue;
+            }
+            $c = $classes[$cid];
+            $out[$pid] = [
+                'id' => (int) $c['id'],
+                'title' => (string) $c['title'],
+                'season_id' => isset($c['season_id']) ? (int) $c['season_id'] : null,
+                'age_group_id' => isset($c['age_group_id']) ? (int) $c['age_group_id'] : null,
+                'coach_id' => isset($c['coach_id']) ? (int) $c['coach_id'] : null,
+                'assistant_coach_id' => isset($c['assistant_coach_id']) ? (int) $c['assistant_coach_id'] : null,
+                'capacity' => isset($c['capacity']) ? (int) $c['capacity'] : null,
+                'status' => $c['status'] ?? 'active',
+                'is_active' => ($c['status'] ?? '') === 'active',
+                'location' => $c['location'] ?? null,
+                'description' => $c['description'] ?? null,
+                'pricing_type' => $c['pricing_type'] ?? null,
+                'monthly_fee' => isset($c['monthly_fee']) ? (int) $c['monthly_fee'] : null,
+                'session_fee' => isset($c['session_fee']) ? (int) $c['session_fee'] : null,
+                'registration_fee' => isset($c['registration_fee']) ? (int) $c['registration_fee'] : null,
+                'start_date' => $c['start_date'] ?? null,
+                'end_date' => $c['end_date'] ?? null,
+                'enrolled_count' => (int) ($c['enrolled_count'] ?? 0),
+            ];
+        }
+
+        return $out;
     }
 }

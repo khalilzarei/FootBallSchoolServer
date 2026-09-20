@@ -20,7 +20,39 @@ class ClassScheduleRepository
 
         $stmt->execute(['class_id' => $classId]);
 
-        return $stmt->fetchAll();
+        return array_map(static fn (array $row): array => self::hydrate($row), $stmt->fetchAll());
+    }
+
+    /**
+     * بارگذاری دسته‌ای برنامه‌های هفتگی چند کلاس (تک کوئری، بدون N+1)
+     * خروجی: [class_id => [schedule, ...]]
+     */
+    public static function forClassIds(array $classIds): array
+    {
+        if (empty($classIds)) {
+            return [];
+        }
+
+        $pdo = Database::connection();
+
+        $ids = array_map(static fn ($id): int => (int) $id, array_values($classIds));
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+
+        $stmt = $pdo->prepare("
+            SELECT * FROM football_class_schedules
+            WHERE class_id IN ({$placeholders})
+            ORDER BY weekday ASC, start_time ASC
+        ");
+        $stmt->execute($ids);
+
+        $grouped = [];
+
+        foreach ($stmt->fetchAll() as $row) {
+            $row = self::hydrate($row);
+            $grouped[(int) $row['class_id']][] = $row;
+        }
+
+        return $grouped;
     }
 
     public static function findById(int $id): ?array
@@ -31,7 +63,17 @@ class ClassScheduleRepository
         $stmt->execute(['id' => $id]);
         $schedule = $stmt->fetch();
 
-        return $schedule ?: null;
+        return $schedule ? self::hydrate($schedule) : null;
+    }
+
+    private static function hydrate(array $row): array
+    {
+        $row['id'] = (int) $row['id'];
+        $row['class_id'] = (int) $row['class_id'];
+        $row['weekday'] = (int) $row['weekday'];
+        $row['is_active'] = ($row['status'] ?? '') === 'active';
+
+        return $row;
     }
 
     public static function create(array $data): int
