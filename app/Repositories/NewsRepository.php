@@ -168,4 +168,124 @@ class NewsRepository
             ]);
         }
     }
+
+    // ═════════════════════════════════════════════════════════════
+    //  رسانه‌های متصل به خبر
+    //
+    //  از رابطه‌ی polymorphic موجود در جدول football_media استفاده
+    //  می‌کنیم (related_type = "news" و related_id = news.id) و
+    //  هیچ تغییر دیتابیسی لازم نیست.
+    // ═════════════════════════════════════════════════════════════
+
+    /** رسانه‌های فعال یک خبر */
+    public static function mediaForNews(int $newsId): array
+    {
+        $pdo = Database::connection();
+
+        $stmt = $pdo->prepare('
+            SELECT * FROM football_media
+            WHERE related_type = "news"
+              AND related_id = :news_id
+              AND status = "active"
+            ORDER BY id ASC
+        ');
+
+        $stmt->execute(['news_id' => $newsId]);
+
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * رسانه‌های چند خبر به‌صورت یکجا — برای جلوگیری از N+1 در لیست‌ها.
+     *
+     * @param int[] $newsIds
+     * @return array<int, array> کلید = news_id
+     */
+    public static function mediaForNewsIds(array $newsIds): array
+    {
+        $newsIds = array_values(array_unique(array_filter(
+            array_map('intval', $newsIds),
+            static fn (int $id): bool => $id > 0
+        )));
+
+        if (empty($newsIds)) {
+            return [];
+        }
+
+        $pdo = Database::connection();
+
+        $params = [];
+        $placeholders = [];
+
+        foreach ($newsIds as $index => $newsId) {
+            $key = 'nid' . $index;
+            $placeholders[] = ':' . $key;
+            $params[$key] = $newsId;
+        }
+
+        $inClause = implode(', ', $placeholders);
+
+        $stmt = $pdo->prepare("
+            SELECT * FROM football_media
+            WHERE related_type = \"news\"
+              AND related_id IN ({$inClause})
+              AND status = \"active\"
+            ORDER BY id ASC
+        ");
+
+        $stmt->execute($params);
+
+        $grouped = [];
+
+        foreach ($stmt->fetchAll() as $row) {
+            $grouped[(int) $row['related_id']][] = $row;
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * جایگزینی کامل رسانه‌های یک خبر.
+     * رسانه‌هایی که در $mediaIds نباشند، از خبر جدا می‌شوند
+     * (فایل حذف نمی‌شود؛ فقط اتصال قطع می‌گردد).
+     *
+     * @param int[] $mediaIds
+     */
+    public static function replaceMedia(int $newsId, array $mediaIds): void
+    {
+        $pdo = Database::connection();
+
+        // قطع اتصال همه‌ی رسانه‌های فعلی این خبر
+        $pdo->prepare('
+            UPDATE football_media
+            SET related_type = NULL, related_id = NULL, updated_at = NOW()
+            WHERE related_type = "news" AND related_id = :news_id
+        ')->execute(['news_id' => $newsId]);
+
+        $mediaIds = array_values(array_unique(array_filter(
+            array_map('intval', $mediaIds),
+            static fn (int $id): bool => $id > 0
+        )));
+
+        if (empty($mediaIds)) {
+            return;
+        }
+
+        $params = ['news_id' => $newsId];
+        $placeholders = [];
+
+        foreach ($mediaIds as $index => $mediaId) {
+            $key = 'mid' . $index;
+            $placeholders[] = ':' . $key;
+            $params[$key] = $mediaId;
+        }
+
+        $inClause = implode(', ', $placeholders);
+
+        $pdo->prepare("
+            UPDATE football_media
+            SET related_type = \"news\", related_id = :news_id, updated_at = NOW()
+            WHERE id IN ({$inClause})
+        ")->execute($params);
+    }
 }
