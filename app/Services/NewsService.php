@@ -15,6 +15,9 @@ class NewsService
     private const AUDIENCE_TYPES = ['global', 'role', 'class', 'age_group', 'player'];
     private const ROLES = ['admin', 'coach', 'player'];
 
+    /** حداکثر تعداد عکس/فیلم قابل اتصال به یک خبر */
+    private const MEDIA_MAX_PER_NEWS = 10;
+
     public static function list(array $query): array
     {
         $page = max(1, (int) ($query['page'] ?? 1));
@@ -25,17 +28,118 @@ class NewsService
         $status = trim((string) ($query['status'] ?? ''));
         if ($status !== '' && !in_array($status, self::STATUSES, true)) throw new AppException('وضعیت خبر معتبر نیست', 422);
 
-        return NewsRepository::paginate([
+        $result = NewsRepository::paginate([
             'status' => $status !== '' ? $status : null,
             'q' => trim((string) ($query['q'] ?? '')) ?: null,
         ], $page, $perPage);
+
+        // چسباندن رسانه‌ها (عکس/فیلم) به هر خبر — بدون N+1
+        self::attachMediaToItems($result['items']);
+
+        return $result;
     }
 
     public static function getDetailed(int $id): array
     {
         $news = self::requireNews($id);
         $news['audiences'] = NewsRepository::audiences($id);
+        $news['media'] = MediaService::presentMany(NewsRepository::mediaForNews($id));
+
         return $news;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+     |  رسانه‌ها
+     ═══════════════════════════════════════════════════════════ */
+
+    /**
+     * افزودن آرایه‌ی 'media' به هر خبر در یک لیست.
+     * از یک کوئری گروهی استفاده می‌کند تا برای n خبر، n+1 کوئری نزنیم.
+     *
+     * @param array<int, array> $items
+     */
+    private static function attachMediaToItems(array &$items): void
+    {
+        if (empty($items)) {
+            return;
+        }
+
+        $newsIds = [];
+
+        foreach ($items as $item) {
+            if (isset($item['id'])) {
+                $newsIds[] = (int) $item['id'];
+            }
+        }
+
+        $grouped = NewsRepository::mediaForNewsIds($newsIds);
+
+        foreach ($items as &$item) {
+            $item['media'] = MediaService::presentMany($grouped[(int) $item['id']] ?? []);
+        }
+
+        unset($item);
+    }
+
+    /**
+     * استخراج شناسه‌های رسانه از ورودی.
+     * سه شکل پشتیبانی می‌شود:
+     *   [12, 15]                          ← آرایه‌ی عدد
+     *   "12,15"                           ← رشته‌ی جدا‌شده با کاما
+     *   '[{"id":12},{"id":15}]'           ← JSON (مثلاً از multipart)
+     *   [{"id":12}, {"media_id":15}]      ← آرایه‌ی آبجکت
+     *
+     * @return int[]
+     */
+    private static function decodeMediaIds(mixed $input): array
+    {
+        if ($input === null || $input === '') {
+            return [];
+        }
+
+        if (is_string($input)) {
+            $decoded = json_decode($input, true);
+
+            if (is_array($decoded)) {
+                $input = $decoded;
+            } else {
+                $input = array_filter(
+                    array_map('trim', explode(',', $input)),
+                    static fn (string $value): bool => $value !== ''
+                );
+            }
+        }
+
+        if (!is_array($input)) {
+            return [];
+        }
+
+        $ids = [];
+
+        foreach ($input as $item) {
+            if (is_array($item)) {
+                $candidate = $item['id'] ?? $item['media_id'] ?? null;
+
+                if ($candidate !== null) {
+                    $ids[] = (int) $candidate;
+                }
+
+                continue;
+            }
+
+            $ids[] = (int) $item;
+        }
+
+        $ids = array_values(array_unique(array_filter($ids, static fn (int $id): bool => $id > 0)));
+
+        if (count($ids) > self::MEDIA_MAX_PER_NEWS) {
+            throw new AppException(
+                'حداکثر ' . self::MEDIA_MAX_PER_NEWS . ' فایل می‌تواند به یک خبر متصل شود',
+                422
+            );
+        }
+
+        return $ids;
     }
 
     public static function create(array $data): array
@@ -53,6 +157,7 @@ class NewsService
         if ($status === 'published' && $publishAt === null) $publishAt = date('Y-m-d H:i:s');
 
         $audiences = self::decodeAudiences($data['audiences'] ?? []);
+        $mediaIds = self::decodeMediaIds($data['media_ids'] ?? ($data['media'] ?? []));
 
         $newsId = NewsRepository::create([
             'title' => $title,
@@ -63,6 +168,11 @@ class NewsService
         ]);
 
         NewsRepository::replaceAudiences($newsId, $audiences);
+
+        // اتصال رسانه‌هایی که از قبل آپلود شده‌اند (اختیاری)
+        if (!empty($mediaIds)) {
+            NewsRepository::replaceMedia($newsId, $mediaIds);
+        }
 
         return self::getDetailed($newsId);
     }
@@ -101,6 +211,16 @@ class NewsService
 
         if (array_key_exists('audiences', $data)) {
             NewsRepository::replaceAudiences($id, self::decodeAudiences($data['audiences']));
+        }
+
+        // جایگزینی رسانه‌ها — رسانه‌هایی که در لیست نباشند از خبر جدا می‌شوند.
+        // فقط وقتی اعمال می‌شود که کلید در ورودی وجود داشته باشد، تا
+        // یک درخواست جزئی (مثلاً فقط تغییر وضعیت) رسانه‌ها را پاک نکند.
+        if (array_key_exists('media_ids', $data) || array_key_exists('media', $data)) {
+            NewsRepository::replaceMedia(
+                $id,
+                self::decodeMediaIds($data['media_ids'] ?? $data['media'])
+            );
         }
 
         return self::getDetailed($id);
