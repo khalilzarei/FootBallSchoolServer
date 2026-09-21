@@ -9,6 +9,7 @@ use App\Core\Auth;
 use App\Core\Config;
 use App\Repositories\AgeGroupRepository;
 use App\Repositories\ChatRepository;
+use App\Repositories\ClassRepository;
 use App\Repositories\PlayerRepository;
 use App\Repositories\UserRepository;
 
@@ -29,24 +30,36 @@ class ChatService
         );
 
         /*
-         * عضویت خودکار در گروه‌های سنی برای کاربران واجد شرایط
+         * عضویت خودکار در روم‌های گروهی (گروه سنی و کلاس)
+         * برای کاربران واجد شرایط.
          */
         $currentUser = Auth::user();
 
-        foreach (ChatRepository::ageGroupRooms() as $agRoom) {
-            $roomId = (int) $agRoom['id'];
+        foreach (ChatRepository::groupRooms() as $groupRoom) {
+            $roomId = (int) $groupRoom['id'];
 
             if (in_array($roomId, $memberRoomIds, true)) {
                 continue;
             }
 
-            $ageGroupId = (int) ($agRoom['age_group_id'] ?? 0);
+            $ageGroupId = (int) ($groupRoom['age_group_id'] ?? 0);
+            $classId = (int) ($groupRoom['class_id'] ?? 0);
 
-            if ($ageGroupId <= 0) {
-                continue;
+            $eligible = false;
+
+            if ($ageGroupId > 0) {
+                $eligible = ChatRepository::userEligibleForAgeGroup(
+                    $currentUser,
+                    $ageGroupId
+                );
+            } elseif ($classId > 0) {
+                $eligible = ChatRepository::userEligibleForClass(
+                    $currentUser,
+                    $classId
+                );
             }
 
-            if (!ChatRepository::userEligibleForAgeGroup($currentUser, $ageGroupId)) {
+            if (!$eligible) {
                 continue;
             }
 
@@ -56,7 +69,7 @@ class ChatService
                 'member'
             );
 
-            $rooms[] = $agRoom;
+            $rooms[] = $groupRoom;
             $memberRoomIds[] = $roomId;
         }
 
@@ -548,20 +561,35 @@ class ChatService
             $room['age_group_id'] ?? null
         );
 
+        $classId = self::normalizeOptionalInt(
+            $room['class_id'] ?? null
+        );
+
         if (
             $isGroup &&
-            $ageGroupId !== null &&
-            !ChatRepository::isMember($roomId, $currentUserId) &&
-            ChatRepository::userEligibleForAgeGroup(
-                Auth::user(),
-                $ageGroupId
-            )
+            !ChatRepository::isMember($roomId, $currentUserId)
         ) {
-            ChatRepository::addMember(
-                $roomId,
-                $currentUserId,
-                'member'
-            );
+            $eligible = false;
+
+            if ($ageGroupId !== null) {
+                $eligible = ChatRepository::userEligibleForAgeGroup(
+                    Auth::user(),
+                    $ageGroupId
+                );
+            } elseif ($classId !== null) {
+                $eligible = ChatRepository::userEligibleForClass(
+                    Auth::user(),
+                    $classId
+                );
+            }
+
+            if ($eligible) {
+                ChatRepository::addMember(
+                    $roomId,
+                    $currentUserId,
+                    'member'
+                );
+            }
         }
 
         /*
@@ -719,6 +747,12 @@ class ChatService
             'media_id' => $mediaId,
         ]);
 
+        /*
+         * ثبت آخرین فعالیت اتاق تا در لیست گفتگوها
+         * بر اساس آخرین پیام مرتب شود.
+         */
+        ChatRepository::touchRoom($roomId);
+
         $message = ChatRepository::findMessageById(
             $messageId
         );
@@ -779,6 +813,450 @@ class ChatService
             'room_id' => $roomId,
             'last_read_message_id' => $lastReadMessageId,
         ];
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+     * ساخت خودکار روم گروه سنی / کلاس
+     * (idempotent — هر بار صدا زده شود، روم و اعضا به‌روز می‌شوند)
+     * ═══════════════════════════════════════════════════════════ */
+
+    /**
+     * ساخت یا به‌روزرسانی روم گروه سنی.
+     *
+     * با ساختن یا ویرایش گروه سنی صدا زده می‌شود.
+     * خرابی چت نباید فرآیند اصلی را خراب کند.
+     */
+    public static function ensureAgeGroupRoom(
+        int $ageGroupId,
+        ?int $createdBy = null
+    ): void {
+        try {
+            $ageGroup = AgeGroupRepository::findById($ageGroupId);
+
+            if (!$ageGroup) {
+                return;
+            }
+
+            self::ensureGroupRoom([
+                'unique_key' => hash(
+                    'sha256',
+                    'age_group-' . $ageGroupId
+                ),
+
+                'room_type' => 'age_group',
+
+                'age_group_id' => $ageGroupId,
+                'class_id' => null,
+
+                'title' => (string) ($ageGroup['title'] ?? ''),
+
+                'eligible_user_ids' => ChatRepository::eligibleUserIdsForAgeGroup(
+                    $ageGroupId
+                ),
+
+                'created_by' => $createdBy,
+            ]);
+        } catch (\Throwable $e) {
+            error_log(
+                '[ChatService] ensureAgeGroupRoom failed for age_group '
+                . $ageGroupId . ': ' . $e->getMessage()
+            );
+        }
+    }
+
+    /**
+     * ساخت یا به‌روزرسانی روم کلاس.
+     *
+     * با ساختن/ویرایش کلاس و ثبت‌نام بازیکن‌ها صدا زده می‌شود.
+     */
+    public static function ensureClassRoom(
+        int $classId,
+        ?int $createdBy = null
+    ): void {
+        try {
+            $class = ClassRepository::findById($classId);
+
+            if (!$class) {
+                return;
+            }
+
+            self::ensureGroupRoom([
+                'unique_key' => hash(
+                    'sha256',
+                    'class-' . $classId
+                ),
+
+                'room_type' => 'group',
+
+                'age_group_id' => null,
+                'class_id' => $classId,
+
+                'title' => (string) ($class['title'] ?? ''),
+
+                'eligible_user_ids' => ChatRepository::eligibleUserIdsForClass(
+                    $classId
+                ),
+
+                'created_by' => $createdBy,
+            ]);
+        } catch (\Throwable $e) {
+            error_log(
+                '[ChatService] ensureClassRoom failed for class '
+                . $classId . ': ' . $e->getMessage()
+            );
+        }
+    }
+
+    /**
+     * هسته‌ی مشترک: ساخت idempotent روم گروهی + همگام‌سازی اعضا.
+     */
+    private static function ensureGroupRoom(array $spec): void
+    {
+        $uniqueKey = (string) $spec['unique_key'];
+        $title = trim((string) ($spec['title'] ?? ''));
+
+        if ($title === '') {
+            return;
+        }
+
+        $eligibleUserIds = array_values(
+            array_unique(
+                array_map(
+                    'intval',
+                    $spec['eligible_user_ids'] ?? []
+                )
+            )
+        );
+
+        $createdBy = $spec['created_by'] ?? null;
+
+        if ($createdBy === null || $createdBy <= 0) {
+            $createdBy = (int) (
+                Auth::id()
+                ?? ChatRepository::firstActiveAdminId()
+                ?? 0
+            );
+        }
+
+        /*
+         * created_by به football_users فوروکین دارد؛
+         * بدون ادمین فعال، ساخت روم را رها می‌کنیم.
+         */
+        if ($createdBy <= 0) {
+            error_log(
+                '[ChatService] ensureGroupRoom: no active admin for created_by'
+            );
+
+            return;
+        }
+
+        $existingRoom = ChatRepository::findByUniqueKey($uniqueKey);
+
+        if ($existingRoom) {
+            $roomId = (int) $existingRoom['id'];
+
+            /*
+             * فقط اعضا همگام می‌شوند.
+             * عنوان/پروفایل روم متعلق به ادمین است و با
+             * ویرایش کلاس/گروه سنی بازنویسی نمی‌شود.
+             */
+            self::syncGroupRoomMembers(
+                $roomId,
+                $eligibleUserIds,
+                $createdBy
+            );
+
+            return;
+        }
+
+        $roomId = ChatRepository::createRoom([
+            'room_type' => $spec['room_type'],
+            'is_group' => true,
+
+            'user1_id' => null,
+            'user2_id' => null,
+
+            'title' => $title,
+            'image' => self::DEFAULT_GROUP_IMAGE,
+
+            'player_id' => null,
+            'class_id' => $spec['class_id'],
+            'age_group_id' => $spec['age_group_id'],
+
+            'subject' => null,
+
+            'unique_key' => $uniqueKey,
+            'status' => 'active',
+            'created_by' => $createdBy,
+        ]);
+
+        self::syncGroupRoomMembers(
+            $roomId,
+            $eligibleUserIds,
+            $createdBy
+        );
+    }
+
+    /**
+     * اعضای واجد شرایطِ هنوز عضو نشده را به روم اضافه می‌کند.
+     * (عضوهای قبلی حذف نمی‌شوند — حذف فقط توسط ادمین است)
+     */
+    private static function syncGroupRoomMembers(
+        int $roomId,
+        array $eligibleUserIds,
+        int $createdBy
+    ): void {
+        foreach ($eligibleUserIds as $userId) {
+            if (ChatRepository::memberExists($roomId, $userId)) {
+                continue;
+            }
+
+            ChatRepository::addMember(
+                $roomId,
+                $userId,
+                $userId === $createdBy ? 'owner' : 'member'
+            );
+        }
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+     * مدیریت روم — فقط ادمین
+     * ═══════════════════════════════════════════════════════════ */
+
+    /**
+     * تغییر پروفایل روم (عنوان/تصویر/موضوع) — فقط ادمین
+     */
+    public static function updateRoom(
+        int $roomId,
+        array $data
+    ): array {
+        self::requireRoom($roomId);
+        self::requireAdmin();
+
+        $fields = [];
+
+        if (array_key_exists('title', $data)) {
+            $title = trim((string) $data['title']);
+
+            if ($title === '') {
+                throw new AppException(
+                    'عنوان گفتگو نمی‌تواند خالی باشد',
+                    422
+                );
+            }
+
+            $fields['title'] = $title;
+        }
+
+        if (array_key_exists('image', $data)) {
+            $fields['image'] = trim((string) $data['image']) ?: null;
+        }
+
+        if (array_key_exists('subject', $data)) {
+            $fields['subject'] = trim((string) $data['subject']) ?: null;
+        }
+
+        if (!empty($fields)) {
+            ChatRepository::updateRoom($roomId, $fields);
+        }
+
+        return self::roomDetails($roomId);
+    }
+
+    /**
+     * افزودن عضو به روم — فقط ادمین
+     */
+    public static function addMembers(
+        int $roomId,
+        array $data
+    ): array {
+        self::requireRoom($roomId);
+        self::requireAdmin();
+
+        $requestedUserIds = $data['user_ids'] ?? null;
+
+        if ($requestedUserIds === null) {
+            $requestedUserIds = [
+                self::normalizeOptionalInt($data['user_id'] ?? null),
+            ];
+        }
+
+        if (!is_array($requestedUserIds)) {
+            throw new AppException(
+                'user_ids باید آرایه باشد',
+                422
+            );
+        }
+
+        $added = 0;
+
+        foreach ($requestedUserIds as $userId) {
+            $normalized = self::normalizeOptionalInt($userId);
+
+            if ($normalized === null) {
+                continue;
+            }
+
+            $user = UserRepository::findById($normalized);
+
+            if (
+                !$user
+                || (string) ($user['status'] ?? '') !== 'active'
+            ) {
+                throw new AppException(
+                    'کاربر پیدا نشد یا فعال نیست',
+                    404
+                );
+            }
+
+            if (
+                !ChatRepository::memberExists($roomId, $normalized)
+            ) {
+                ChatRepository::addMember(
+                    $roomId,
+                    $normalized,
+                    'member'
+                );
+
+                $added++;
+            }
+        }
+
+        if ($added === 0) {
+            throw new AppException(
+                'هیچ عضوی اضافه نشد',
+                422
+            );
+        }
+
+        return self::roomDetails($roomId);
+    }
+
+    /**
+     * حذف عضو از روم — فقط ادمین
+     */
+    public static function removeMember(
+        int $roomId,
+        int $userId
+    ): array {
+        self::requireRoom($roomId);
+        self::requireAdmin();
+
+        if ($userId <= 0) {
+            throw new AppException(
+                'شناسه کاربر معتبر نیست',
+                422
+            );
+        }
+
+        if (!ChatRepository::isMember($roomId, $userId)) {
+            throw new AppException(
+                'این کاربر عضو گفتگو نیست',
+                404
+            );
+        }
+
+        if (ChatRepository::countActiveMembers($roomId) <= 1) {
+            throw new AppException(
+                'حداقل یک عضو برای گفتگو لازم است',
+                422
+            );
+        }
+
+        ChatRepository::setMemberStatus(
+            $roomId,
+            $userId,
+            'removed'
+        );
+
+        return self::roomDetails($roomId);
+    }
+
+    /**
+     * حذف (غیرفعال‌سازی) روم — فقط ادمین
+     */
+    public static function deleteRoom(int $roomId): array
+    {
+        self::requireRoom($roomId);
+        self::requireAdmin();
+
+        ChatRepository::setRoomStatus($roomId, 'inactive');
+
+        return [
+            'id' => $roomId,
+            'status' => 'inactive',
+        ];
+    }
+
+    /**
+     * حذف پیام:
+     * - هر عضو می‌تواند پیام خودش را حذف کند
+     * - ادمین هر پیامی را می‌تواند حذف کند
+     */
+    public static function deleteMessage(
+        int $roomId,
+        int $messageId
+    ): array {
+        self::requireRoom($roomId);
+
+        $userId = (int) Auth::id();
+
+        if (!ChatRepository::isMember($roomId, $userId)) {
+            throw new AppException(
+                'شما عضو این اتاق چت نیستید',
+                403
+            );
+        }
+
+        $message = ChatRepository::findMessageWithRoom($messageId);
+
+        if (!$message || (int) $message['chat_room_id'] !== $roomId) {
+            throw new AppException(
+                'پیام یافت نشد',
+                404
+            );
+        }
+
+        $isOwnMessage = (int) $message['sender_id'] === $userId;
+        $isAdmin = (string) Auth::role() === 'admin';
+
+        if (!$isOwnMessage && !$isAdmin) {
+            throw new AppException(
+                'فقط خودتان یا مدیر می‌توانید این پیام را حذف کنید',
+                403
+            );
+        }
+
+        ChatRepository::softDeleteMessage($messageId);
+
+        return [
+            'id' => $messageId,
+            'deleted' => true,
+        ];
+    }
+
+    /**
+     * مخاطبین قابل گفتگو برای ادمین
+     * (بازیکنان + مربیان فعال)
+     */
+    public static function adminContacts(): array
+    {
+        self::requireAdmin();
+
+        return ChatRepository::adminContacts();
+    }
+
+    /**
+     * بررسی نقش ادمین
+     */
+    private static function requireAdmin(): void
+    {
+        if ((string) Auth::role() !== 'admin') {
+            throw new AppException(
+                'فقط مدیر می‌تواند این کار را انجام دهد',
+                403
+            );
+        }
     }
 
     /**
@@ -876,6 +1354,12 @@ class ChatService
                 )
             );
 
+            $role = (string) (
+                $member['user_role']
+                ?? $member['role']
+                ?? ''
+            );
+
             $userData = [
                 'id' => $userId,
 
@@ -883,15 +1367,17 @@ class ChatService
                     $member['full_name'] ?? ''
                 ),
 
-                'avatar' => $avatar !== ''
-                    ? $avatar
-                    : null,
-
-                'role' => (string) (
-                    $member['user_role']
-                    ?? $member['role']
-                    ?? ''
+                /*
+                 * آواتار عضو (URL کامل).
+                 * اگر آواتار تنظیم نشده باشد، آواتار
+                 * پیش‌فرض مربوط به نقش عضو می‌آید.
+                 */
+                'avatar' => AvatarService::getAvatarUrl(
+                    $avatar !== '' ? $avatar : null,
+                    AvatarService::defaultTypeForRole($role)
                 ),
+
+                'role' => $role,
 
                 'member_role' => (string) (
                     $member['member_role']
@@ -920,7 +1406,7 @@ class ChatService
                 )
                 : '';
 
-            $image = $targetUser
+            $targetAvatar = $targetUser
                 ? trim(
                     (string) (
                         $targetUser['avatar_path']
@@ -930,9 +1416,19 @@ class ChatService
                 )
                 : '';
 
-            if ($image === '') {
-                $image = null;
-            }
+            /*
+             * عکس گفتگوی خصوصی = آواتار کاربر مقابل (URL کامل).
+             */
+            $image = AvatarService::getAvatarUrl(
+                $targetAvatar !== '' ? $targetAvatar : null,
+                AvatarService::defaultTypeForRole(
+                    (string) (
+                        $targetUser['user_role']
+                        ?? $targetUser['role']
+                        ?? ''
+                    )
+                )
+            );
         } else {
             /*
              * برای گروه:
@@ -969,6 +1465,14 @@ class ChatService
             'last_message' => $lastMessage,
 
             'unread_count' => $unreadCount,
+
+            /* وضعیت قفل (برای نمایش در کلاینت‌ها) */
+            'is_locked' => isset($room['is_locked'])
+                ? (int) $room['is_locked'] === 1
+                : false,
+
+            /* وضعیت روم برای سازگاری با DTO کلاینت‌ها */
+            'status' => (string) ($room['status'] ?? 'active'),
         ];
     }
 

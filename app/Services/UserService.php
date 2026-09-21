@@ -28,8 +28,13 @@ class UserService
         if ($role !== '' && !in_array($role, self::ROLES, true)) throw new AppException('نقش کاربر معتبر نیست', 422);
         if ($status !== '' && !in_array($status, self::STATUSES, true)) throw new AppException('وضعیت کاربر معتبر نیست', 422);
 
+        /*
+         * بازیکنان در بخش جداگانه‌ی «بازیکنان» مدیریت می‌شوند؛
+         * در لیست کاربران (بدون فیلتر نقش) نمایش داده نمی‌شوند.
+         */
         $result = UserRepository::paginate([
             'role' => $role !== '' ? $role : null,
+            'exclude_role' => $role === '' ? 'player' : null,
             'status' => $status !== '' ? $status : null,
             'q' => $q !== '' ? $q : null,
         ], $page, $perPage);
@@ -60,8 +65,31 @@ class UserService
         self::validateIdentifiers($mobile, $nationalCode);
         self::assertUniqueIdentifiers($mobile, $nationalCode);
 
-        $password = trim((string) ($data['password'] ?? '')) ?: self::generatePassword();
-        if (strlen($password) < 8) throw new AppException('رمز عبور باید حداقل ۸ کاراکتر باشد', 422);
+        $password = trim((string) ($data['password'] ?? ''));
+        $generatedInitial = false;
+
+        if ($password === '') {
+            /*
+             * وقتی ادمین رمز ندهد:
+             * - برای coach/player اگر کد ملی دارد، کد ملی همان
+             *   رمز اولیه است (در اولین ورود اجباراً عوض می‌شود
+             *   — must_change_password از پیش 1 است)
+             * - وگرنه رمز تصادفی تولید و به ادمین برمی‌گردد
+             */
+            if (
+                $nationalCode !== null
+                && in_array($role, ['coach', 'player'], true)
+            ) {
+                $password = $nationalCode;
+            } else {
+                $password = self::generatePassword();
+                $generatedInitial = true;
+            }
+        }
+
+        if (strlen($password) < 8) {
+            throw new AppException('رمز عبور باید حداقل ۸ کاراکتر باشد', 422);
+        }
 
         // پردازش آواتار
         $avatarPath = null;
@@ -89,6 +117,8 @@ class UserService
         $result = self::sanitize(UserRepository::findById($userId));
         if (empty($data['password'])) {
             $result['initial_password'] = $password;
+            // true = رمز اولیه همان کد ملی است / false = رمز تصادفی
+            $result['initial_password_is_national_code'] = !$generatedInitial;
         }
         return $result;
     }

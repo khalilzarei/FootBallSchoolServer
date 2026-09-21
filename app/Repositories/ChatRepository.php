@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Repositories;
 
 use App\Core\Database;
+use App\Services\AvatarService;
 
 class ChatRepository
 {
@@ -413,7 +414,8 @@ class ChatRepository
             SELECT
                 msg.*,
                 u.full_name AS sender_name,
-                u.role AS sender_role
+                u.role AS sender_role,
+                u.avatar_path AS sender_avatar
             FROM football_chat_messages msg
             INNER JOIN football_users u
                 ON u.id = msg.sender_id
@@ -531,6 +533,28 @@ class ChatRepository
         return (int) $pdo->lastInsertId();
     }
 
+    /**
+     * به‌روزرسانی updated_at اتاق برای نمایش آخرین فعالیت.
+     *
+     * با این کار، ترتیب لیست گفتگوها بر اساس
+     * آخرین پیام رد‌وبدل‌شده خواهد بود.
+     */
+    public static function touchRoom(
+        int $roomId
+    ): void {
+        $pdo = Database::connection();
+
+        $stmt = $pdo->prepare('
+            UPDATE football_chat_rooms
+            SET updated_at = NOW()
+            WHERE id = :id
+        ');
+
+        $stmt->execute([
+            'id' => $roomId,
+        ]);
+    }
+
     public static function findMessageById(
         int $id
     ): ?array {
@@ -586,7 +610,8 @@ class ChatRepository
             SELECT
                 msg.*,
                 u.full_name AS sender_name,
-                u.role AS sender_role
+                u.role AS sender_role,
+                u.avatar_path AS sender_avatar
             FROM football_chat_messages msg
             INNER JOIN (
                 SELECT
@@ -715,6 +740,20 @@ class ChatRepository
 
                 'role' => (string) (
                     $row['sender_role'] ?? ''
+                ),
+
+                /*
+                 * آواتار فرستنده (URL کامل).
+                 * اگر آواتار تنظیم نشده باشد، آواتار
+                 * پیش‌فرض مربوط به نقش فرستنده می‌آید.
+                 */
+                'avatar' => AvatarService::getAvatarUrl(
+                    !empty($row['sender_avatar'])
+                        ? (string) $row['sender_avatar']
+                        : null,
+                    AvatarService::defaultTypeForRole(
+                        (string) ($row['sender_role'] ?? '')
+                    )
                 ),
 
                 'status' => 'active',
@@ -1130,5 +1169,512 @@ class ChatRepository
         ]);
 
         return (bool) $stmt->fetch();
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+     * روم‌های گروهی خودکار (گروه سنی / کلاس)
+     * ═══════════════════════════════════════════════════════════ */
+
+    /**
+     * همه روم‌های گروهی وابسته به گروه سنی یا کلاس (فعال).
+     * برای auto-join در rooms() استفاده می‌شود.
+     */
+    public static function groupRooms(): array
+    {
+        $pdo = Database::connection();
+
+        /*
+         * اگر migration ستون is_group هنوز اجرا نشده باشد،
+         * به query قدیمی (room_type) برمی‌گردیم.
+         */
+        if (
+            !self::hasColumn('football_chat_rooms', 'is_group')
+            || !self::hasColumn('football_chat_rooms', 'class_id')
+        ) {
+            return self::ageGroupRooms();
+        }
+
+        $stmt = $pdo->query('
+            SELECT *
+            FROM football_chat_rooms
+            WHERE is_group = 1
+              AND status = "active"
+              AND (
+                  age_group_id IS NOT NULL
+                  OR class_id IS NOT NULL
+              )
+        ');
+
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * شناسه‌ی کاربریِ روم گروه سنی (اگر وجود داشته باشد).
+     */
+    public static function findAgeGroupRoomId(int $ageGroupId): ?int
+    {
+        $pdo = Database::connection();
+
+        $uniqueKey = hash(
+            'sha256',
+            'age_group-' . $ageGroupId
+        );
+
+        $stmt = $pdo->prepare('
+            SELECT id
+            FROM football_chat_rooms
+            WHERE unique_key = :unique_key
+              AND status = "active"
+            LIMIT 1
+        ');
+
+        $stmt->execute(['unique_key' => $uniqueKey]);
+
+        $row = $stmt->fetch();
+
+        return $row ? (int) $row['id'] : null;
+    }
+
+    /**
+     * شناسه‌ی کاربریِ روم کلاس (اگر وجود داشته باشد).
+     */
+    public static function findClassRoomId(int $classId): ?int
+    {
+        $pdo = Database::connection();
+
+        $uniqueKey = hash(
+            'sha256',
+            'class-' . $classId
+        );
+
+        $stmt = $pdo->prepare('
+            SELECT id
+            FROM football_chat_rooms
+            WHERE unique_key = :unique_key
+              AND status = "active"
+            LIMIT 1
+        ');
+
+        $stmt->execute(['unique_key' => $uniqueKey]);
+
+        $row = $stmt->fetch();
+
+        return $row ? (int) $row['id'] : null;
+    }
+
+    /**
+     * شناسه‌ی کاربری‌های واجد شرایط برای روم یک گروه سنی:
+     * - همه ادمین‌های فعال
+     * - مربیان اصلی/کمکی کلاس‌های فعالِ گروه سنی
+     * - بازیکنان دارای حساب کاربری با ثبت‌نام فعال در کلاس‌های گروه سنی
+     */
+    public static function eligibleUserIdsForAgeGroup(
+        int $ageGroupId
+    ): array {
+        $pdo = Database::connection();
+
+        $stmt = $pdo->prepare('
+            SELECT DISTINCT u.id
+            FROM (
+                SELECT u.id
+                FROM football_users u
+                WHERE u.role = "admin"
+                  AND u.status = "active"
+                  AND u.deleted_at IS NULL
+
+                UNION
+
+                SELECT u.id
+                FROM football_classes c
+                INNER JOIN football_coaches co
+                    ON (co.id = c.coach_id OR co.id = c.assistant_coach_id)
+                INNER JOIN football_users u
+                    ON u.id = co.user_id
+                    AND u.status = "active"
+                    AND u.deleted_at IS NULL
+                WHERE c.age_group_id = :ag1
+                  AND c.status = "active"
+                  AND c.deleted_at IS NULL
+
+                UNION
+
+                SELECT pu.id
+                FROM football_classes c
+                INNER JOIN football_enrollments e
+                    ON e.class_id = c.id
+                    AND e.status = "active"
+                    AND e.ended_at IS NULL
+                INNER JOIN football_players p
+                    ON p.id = e.player_id
+                    AND p.deleted_at IS NULL
+                    AND p.user_id IS NOT NULL
+                INNER JOIN football_users pu
+                    ON pu.id = p.user_id
+                    AND pu.status = "active"
+                    AND pu.deleted_at IS NULL
+                WHERE c.age_group_id = :ag2
+                  AND c.status = "active"
+                  AND c.deleted_at IS NULL
+            ) u
+        ');
+
+        $stmt->execute([
+            'ag1' => $ageGroupId,
+            'ag2' => $ageGroupId,
+        ]);
+
+        return array_map(
+            'intval',
+            array_column($stmt->fetchAll(), 'id')
+        );
+    }
+
+    /**
+     * شناسه‌ی کاربری‌های واجد شرایط برای روم یک کلاس:
+     * - همه ادمین‌های فعال
+     * - مربی اصلی و کمکی کلاس
+     * - بازیکنان دارای حساب کاربری با ثبت‌نام فعال در همین کلاس
+     */
+    public static function eligibleUserIdsForClass(
+        int $classId
+    ): array {
+        $pdo = Database::connection();
+
+        $stmt = $pdo->prepare('
+            SELECT DISTINCT u.id
+            FROM (
+                SELECT u.id
+                FROM football_users u
+                WHERE u.role = "admin"
+                  AND u.status = "active"
+                  AND u.deleted_at IS NULL
+
+                UNION
+
+                SELECT u.id
+                FROM football_classes c
+                INNER JOIN football_coaches co
+                    ON (co.id = c.coach_id OR co.id = c.assistant_coach_id)
+                INNER JOIN football_users u
+                    ON u.id = co.user_id
+                    AND u.status = "active"
+                    AND u.deleted_at IS NULL
+                WHERE c.id = :cid1
+                  AND c.status = "active"
+                  AND c.deleted_at IS NULL
+
+                UNION
+
+                SELECT pu.id
+                FROM football_classes c
+                INNER JOIN football_enrollments e
+                    ON e.class_id = c.id
+                    AND e.status = "active"
+                    AND e.ended_at IS NULL
+                INNER JOIN football_players p
+                    ON p.id = e.player_id
+                    AND p.deleted_at IS NULL
+                    AND p.user_id IS NOT NULL
+                INNER JOIN football_users pu
+                    ON pu.id = p.user_id
+                    AND pu.status = "active"
+                    AND pu.deleted_at IS NULL
+                WHERE c.id = :cid2
+                  AND c.status = "active"
+                  AND c.deleted_at IS NULL
+            ) u
+        ');
+
+        $stmt->execute([
+            'cid1' => $classId,
+            'cid2' => $classId,
+        ]);
+
+        return array_map(
+            'intval',
+            array_column($stmt->fetchAll(), 'id')
+        );
+    }
+
+    /**
+     * آیا کاربر واجد شرایط عضویت در روم یک کلاس است؟
+     */
+    public static function userEligibleForClass(
+        array $user,
+        int $classId
+    ): bool {
+        if ($classId <= 0) {
+            return false;
+        }
+
+        $role = (string) ($user['role'] ?? '');
+        $userId = (int) ($user['id'] ?? 0);
+
+        if ($userId <= 0) {
+            return false;
+        }
+
+        if ($role === 'admin') {
+            return true;
+        }
+
+        $pdo = Database::connection();
+
+        if ($role === 'coach') {
+            $stmt = $pdo->prepare('
+                SELECT c.id
+                FROM football_classes c
+                INNER JOIN football_coaches co
+                    ON (co.id = c.coach_id OR co.id = c.assistant_coach_id)
+                    AND co.user_id = :user_id
+                WHERE c.id = :class_id
+                  AND c.status = "active"
+                  AND c.deleted_at IS NULL
+                LIMIT 1
+            ');
+            $stmt->execute([
+                'user_id' => $userId,
+                'class_id' => $classId,
+            ]);
+
+            return (bool) $stmt->fetch();
+        }
+
+        if ($role === 'player') {
+            $stmt = $pdo->prepare('
+                SELECT e.id
+                FROM football_players p
+                INNER JOIN football_enrollments e
+                    ON e.player_id = p.id
+                    AND e.class_id = :class_id
+                    AND e.status = "active"
+                    AND e.ended_at IS NULL
+                WHERE p.user_id = :user_id
+                  AND p.deleted_at IS NULL
+                LIMIT 1
+            ');
+            $stmt->execute([
+                'class_id' => $classId,
+                'user_id' => $userId,
+            ]);
+
+            return (bool) $stmt->fetch();
+        }
+
+        return false;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+     * مدیریت روم توسط ادمین
+     * ═══════════════════════════════════════════════════════════ */
+
+    public static function updateRoom(
+        int $roomId,
+        array $fields
+    ): void {
+        $pdo = Database::connection();
+
+        $sets = [];
+        $params = ['id' => $roomId];
+
+        foreach (['title', 'image', 'subject'] as $col) {
+            if (array_key_exists($col, $fields)) {
+                $sets[] = "{$col} = :{$col}";
+                $params[$col] = $fields[$col];
+            }
+        }
+
+        if (empty($sets)) {
+            return;
+        }
+
+        $sql = 'UPDATE football_chat_rooms SET '
+            . implode(', ', $sets)
+            . ' WHERE id = :id';
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+    }
+
+    public static function setRoomStatus(
+        int $roomId,
+        string $status
+    ): void {
+        $pdo = Database::connection();
+
+        $stmt = $pdo->prepare('
+            UPDATE football_chat_rooms
+            SET status = :status
+            WHERE id = :id
+        ');
+
+        $stmt->execute([
+            'status' => $status,
+            'id' => $roomId,
+        ]);
+    }
+
+    public static function setMemberStatus(
+        int $roomId,
+        int $userId,
+        string $status
+    ): void {
+        $pdo = Database::connection();
+
+        $stmt = $pdo->prepare('
+            UPDATE football_chat_room_members
+            SET status = :status
+            WHERE chat_room_id = :chat_room_id
+              AND user_id = :user_id
+        ');
+
+        $stmt->execute([
+            'status' => $status,
+            'chat_room_id' => $roomId,
+            'user_id' => $userId,
+        ]);
+    }
+
+    public static function countActiveMembers(int $roomId): int
+    {
+        $pdo = Database::connection();
+
+        $stmt = $pdo->prepare('
+            SELECT COUNT(*)
+            FROM football_chat_room_members
+            WHERE chat_room_id = :chat_room_id
+              AND status = "active"
+        ');
+
+        $stmt->execute(['chat_room_id' => $roomId]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * حذف نرم پیام (فقط اگر هنوز حذف نشده باشد).
+     */
+    public static function softDeleteMessage(int $messageId): void
+    {
+        $pdo = Database::connection();
+
+        $stmt = $pdo->prepare('
+            UPDATE football_chat_messages
+            SET deleted_at = NOW()
+            WHERE id = :id
+              AND deleted_at IS NULL
+        ');
+
+        $stmt->execute(['id' => $messageId]);
+    }
+
+    public static function findMessageWithRoom(
+        int $messageId
+    ): ?array {
+        $pdo = Database::connection();
+
+        $stmt = $pdo->prepare('
+            SELECT m.id, m.chat_room_id, m.sender_id
+            FROM football_chat_messages m
+            WHERE m.id = :id
+              AND m.deleted_at IS NULL
+            LIMIT 1
+        ');
+
+        $stmt->execute(['id' => $messageId]);
+
+        $row = $stmt->fetch();
+
+        return $row ?: null;
+    }
+
+    /**
+     * شناسه‌ی اولین ادمین فعال
+     * (برای created_by در ساخت خودکار روم بدون کاربر احراز‌شده،
+     * مثلاً در اسکریپت backfill)
+     */
+    public static function firstActiveAdminId(): ?int
+    {
+        $pdo = Database::connection();
+
+        $stmt = $pdo->query('
+            SELECT id
+            FROM football_users
+            WHERE role = "admin"
+              AND status = "active"
+              AND deleted_at IS NULL
+            ORDER BY id ASC
+            LIMIT 1
+        ');
+
+        $row = $stmt->fetch();
+
+        return $row ? (int) $row['id'] : null;
+    }
+
+    /**
+     * مخاطبین قابل گفتگو برای ادمین:
+     * همه بازیکنان و مربیان فعال (با آواتار و عنوان کلاس).
+     */
+    public static function adminContacts(): array
+    {
+        $pdo = Database::connection();
+
+        $stmt = $pdo->query('
+            SELECT
+                u.id,
+                u.full_name,
+                u.avatar_path,
+                u.role
+            FROM football_users u
+            WHERE u.role IN ("player", "coach")
+              AND u.status = "active"
+              AND u.deleted_at IS NULL
+            ORDER BY u.role ASC, u.full_name ASC
+        ');
+
+        $rows = $stmt->fetchAll();
+
+        if (empty($rows)) {
+            return [];
+        }
+
+        $classTitleByUserId = [];
+
+        $stmt = $pdo->query('
+            SELECT co.user_id, c.title AS class_title
+            FROM football_classes c
+            INNER JOIN football_coaches co
+                ON (co.id = c.coach_id OR co.id = c.assistant_coach_id)
+            WHERE c.status = "active"
+              AND c.deleted_at IS NULL
+            ORDER BY c.id DESC
+        ');
+
+        foreach ($stmt->fetchAll() as $r) {
+            $uid = (int) $r['user_id'];
+            if (!isset($classTitleByUserId[$uid])) {
+                $classTitleByUserId[$uid] = (string) $r['class_title'];
+            }
+        }
+
+        $out = [];
+
+        foreach ($rows as $r) {
+            $uid = (int) $r['id'];
+
+            $out[] = [
+                'user_id' => $uid,
+                'full_name' => (string) $r['full_name'],
+                'role' => (string) $r['role'],
+                'avatar_url' => AvatarService::getAvatarUrl(
+                    $r['avatar_path'] ?? null,
+                    'user'
+                ),
+                'class_title' => $classTitleByUserId[$uid] ?? null,
+            ];
+        }
+
+        return $out;
     }
 }

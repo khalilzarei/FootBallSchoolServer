@@ -104,6 +104,11 @@ class EnrollmentService
             $created++;
         }
 
+        /* همگام‌سازی روم چت کلاس با بازیکنان جدید */
+        if ($created > 0) {
+            ChatService::ensureClassRoom($classId, Auth::id());
+        }
+
         return [
             'age_group_id' => $ageGroupId,
             'total_players' => $total,
@@ -149,6 +154,14 @@ class EnrollmentService
             'notes' => trim((string) ($data['notes'] ?? '')) ?: null,
             'created_by' => Auth::id(),
         ]);
+
+        /*
+         * اگر بازیکن دارای حساب کاربری باشد،
+         * به روم چت کلاس (و روم گروه سنی) اضافه می‌شود.
+         */
+        if ($status === 'active') {
+            ChatService::ensureClassRoom($classId, Auth::id());
+        }
 
         return self::requireEnrollment($enrollmentId);
     }

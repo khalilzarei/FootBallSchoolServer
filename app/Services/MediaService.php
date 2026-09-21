@@ -24,7 +24,7 @@ class MediaService
         if ($perPage < 1) $perPage = 20;
         if ($perPage > 100) $perPage = 100;
 
-        return MediaRepository::paginate([
+        $result = MediaRepository::paginate([
             'status' => trim((string) ($query['status'] ?? '')) ?: null,
             'visibility' => trim((string) ($query['visibility'] ?? '')) ?: null,
             'file_type' => trim((string) ($query['file_type'] ?? '')) ?: null,
@@ -32,13 +32,116 @@ class MediaService
             'related_id' => (int) ($query['related_id'] ?? 0) > 0 ? (int) $query['related_id'] : null,
             'q' => trim((string) ($query['q'] ?? '')) ?: null,
         ], $page, $perPage);
+
+        // شکل خروجی یکدست: url / file_name / file_size / stream_url
+        $result['items'] = self::presentMany($result['items']);
+
+        return $result;
     }
 
     public static function getDetailed(int $id): array
     {
         $media = self::requireMedia($id);
-        $media['audiences'] = MediaRepository::audiences($id);
-        return $media;
+
+        // ❗ رفع IDOR (مورد H6 بازبینی):
+        // پیش‌تر این بررسی وجود نداشت و هر کاربر احراز هویت‌شده می‌توانست
+        // با شمارش id، متادیتای همه‌ی رسانه‌های سیستم را بخواند.
+        self::assertCanView($media);
+
+        return self::present($media, true);
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+     |  ارائه‌ی شکل یکدست برای اپ‌ها
+     |  سرور ستون‌های خام دیتابیس را برمی‌گرداند (stored_name,
+     |  size_bytes, uploader_id, thumbnail_path) در حالی که اپ‌ها
+     |  نام‌های دیگری انتظار داشتند (file_name, file_size, url,
+     |  uploaded_by). این تابع فاصله را پر می‌کند و آدرس‌های
+     |  قابل استفاده را می‌سازد.
+     ═══════════════════════════════════════════════════════════ */
+
+    public static function present(array $media, bool $withAudiences = false): array
+    {
+        $id = (int) $media['id'];
+
+        $presented = [
+            'id'               => $id,
+            'file_name'        => (string) ($media['stored_name'] ?? ''),
+            'original_name'    => (string) ($media['original_name'] ?? ''),
+            'file_type'        => (string) ($media['file_type'] ?? 'other'),
+            'mime_type'        => (string) ($media['mime_type'] ?? 'application/octet-stream'),
+            'file_size'        => (int) ($media['size_bytes'] ?? 0),
+            'duration_seconds' => isset($media['duration_seconds']) && $media['duration_seconds'] !== null
+                                    ? (int) $media['duration_seconds']
+                                    : null,
+            // دانلود (Content-Disposition: attachment)
+            'url'              => self::mediaUrl($id, 'download'),
+            // پخش/نمایش درون‌خطی (Content-Disposition: inline + پشتیبانی Range)
+            'stream_url'       => self::mediaUrl($id, 'stream'),
+            'thumbnail_url'    => !empty($media['thumbnail_path'])
+                                    ? self::mediaUrl($id, 'thumbnail')
+                                    : null,
+            'visibility'       => (string) ($media['visibility'] ?? 'private'),
+            'related_type'     => $media['related_type'] ?? null,
+            'related_id'       => isset($media['related_id']) ? (int) $media['related_id'] : null,
+            'description'      => $media['description'] ?? null,
+            'status'           => (string) ($media['status'] ?? 'active'),
+            'uploaded_by'      => isset($media['uploader_id']) ? (int) $media['uploader_id'] : null,
+            'uploader_name'    => $media['uploader_name'] ?? null,
+            'created_at'       => $media['created_at'] ?? null,
+            'updated_at'       => $media['updated_at'] ?? null,
+        ];
+
+        if ($withAudiences) {
+            $presented['audiences'] = MediaRepository::audiences($id);
+        }
+
+        return $presented;
+    }
+
+    /**
+     * @param array<int, array> $rows
+     * @return array<int, array>
+     */
+    public static function presentMany(array $rows): array
+    {
+        return array_map(
+            static fn (array $row): array => self::present($row),
+            array_values($rows)
+        );
+    }
+
+    private static function mediaUrl(int $id, string $action): string
+    {
+        return self::baseUrl() . '/media/' . $id . '/' . $action;
+    }
+
+    /**
+     * ریشه‌ی API (شامل /api/v1).
+     * اگر 'app.public_base_url' تنظیم شده باشد از آن استفاده می‌شود،
+     * وگرنه از روی Host درخواست ساخته می‌شود.
+     * مثال مقدار تنظیمات: https://football.madahinote.ir/api/v1
+     */
+    private static function baseUrl(): string
+    {
+        $configured = trim((string) Config::get('app.public_base_url', ''));
+
+        if ($configured !== '') {
+            return rtrim($configured, '/');
+        }
+
+        return self::origin() . '/api/v1';
+    }
+
+    private static function origin(): string
+    {
+        $scheme = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
+            ? 'https'
+            : 'http';
+
+        $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
+
+        return $scheme . '://' . $host;
     }
 
     public static function upload(array $data, array $files): array
@@ -128,11 +231,73 @@ class MediaService
         return self::getDetailed($mediaId);
     }
 
+    /** دانلود فایل (مرورگر/اپ آن را ذخیره می‌کند) */
     public static function download(int $id): void
+    {
+        self::serve($id, 'attachment');
+    }
+
+    /** پخش درون‌خطی — برای نمایش ویدیو در player بدون اجبار به دانلود */
+    public static function stream(int $id): void
+    {
+        self::serve($id, 'inline');
+    }
+
+    /** نمایش thumbnail با همان کنترل دسترسی رسانه‌ی اصلی */
+    public static function thumbnail(int $id): void
     {
         $media = self::requireMedia($id);
 
-        if ($media['status'] !== 'active') throw new AppException('رسانه در دسترس نیست', 404);
+        if (($media['status'] ?? '') !== 'active') {
+            throw new AppException('رسانه در دسترس نیست', 404);
+        }
+
+        self::assertCanView($media);
+
+        $relativePath = trim((string) ($media['thumbnail_path'] ?? ''));
+        if ($relativePath === '') {
+            throw new AppException('thumbnail برای این رسانه موجود نیست', 404);
+        }
+
+        $fullPath = BASE_PATH . '/storage/' . ltrim($relativePath, '/');
+
+        if (!is_file($fullPath) || !is_readable($fullPath)) {
+            throw new AppException('thumbnail یافت نشد', 404);
+        }
+
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        $mime = function_exists('mime_content_type')
+            ? (string) (mime_content_type($fullPath) ?: 'image/jpeg')
+            : 'image/jpeg';
+
+        header('Content-Type: ' . $mime);
+        header('Content-Length: ' . filesize($fullPath));
+        header('Content-Disposition: inline');
+        header('Cache-Control: private, max-age=3600');
+        header('X-Content-Type-Options: nosniff');
+
+        readfile($fullPath);
+        exit;
+    }
+
+    /**
+     * ارسال فایل با پشتیبانی از هدر Range.
+     *
+     * ⚠ چرا Range لازم است:
+     * پیاده‌سازی قبلی کل فایل را با readfile() می‌فرستاد و هدر Range را
+     * نادیده می‌گرفت. نتیجه: player نمی‌توانست در ویدیو seek کند و هر
+     * قطعی شبکه، دانلود را از صفر شروع می‌کرد.
+     */
+    private static function serve(int $id, string $disposition): void
+    {
+        $media = self::requireMedia($id);
+
+        if (($media['status'] ?? '') !== 'active') {
+            throw new AppException('رسانه در دسترس نیست', 404);
+        }
 
         self::assertCanView($media);
 
@@ -141,14 +306,101 @@ class MediaService
         if (!is_file($fullPath)) throw new AppException('فایل رسانه یافت نشد', 404);
         if (!is_readable($fullPath)) throw new AppException('فایل رسانه قابل خواندن نیست', 500);
 
-        header('Content-Type: ' . $media['mime_type']);
-        header('Content-Length: ' . filesize($fullPath));
-        header('Content-Disposition: attachment; filename="' . rawurlencode((string) $media['original_name']) . '"');
-        header('Cache-Control: no-store, no-cache, must-revalidate');
-        header('Pragma: no-cache');
+        $size = (int) filesize($fullPath);
+        $mime = (string) (($media['mime_type'] ?? '') !== '' ? $media['mime_type'] : 'application/octet-stream');
 
-        readfile($fullPath);
+        // خروجی باینری باید دقیقاً همان بایت‌ها باشد؛ هر بافر فعال را می‌بندیم.
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        header('Content-Type: ' . $mime);
+        header('Accept-Ranges: bytes');
+        header('Cache-Control: private, max-age=0, must-revalidate');
+        header('Pragma: public');
+        header('X-Content-Type-Options: nosniff');
+
+        if ($disposition === 'attachment') {
+            $name = rawurlencode((string) (($media['original_name'] ?? '') !== '' ? $media['original_name'] : $media['stored_name']));
+            header("Content-Disposition: attachment; filename=\"{$name}\"; filename*=UTF-8''{$name}");
+        } else {
+            header('Content-Disposition: inline');
+        }
+
+        $range = (string) ($_SERVER['HTTP_RANGE'] ?? '');
+
+        if ($range !== '' && preg_match('/bytes=(\d*)-(\d*)/i', $range, $m) === 1) {
+            $rawStart = $m[1];
+            $rawEnd = $m[2];
+
+            if ($rawStart === '' && $rawEnd !== '') {
+                // bytes=-N  → N بایت آخر
+                $length = min((int) $rawEnd, $size);
+                $start = max(0, $size - $length);
+                $end = $size - 1;
+            } else {
+                $start = $rawStart === '' ? 0 : (int) $rawStart;
+                $end = $rawEnd === '' ? ($size - 1) : (int) $rawEnd;
+            }
+
+            if ($start > $end || $start >= $size) {
+                header('Content-Range: bytes */' . $size);
+                http_response_code(416);
+                exit;
+            }
+
+            $end = min($end, $size - 1);
+            $length = $end - $start + 1;
+
+            http_response_code(206);
+            header('Content-Range: bytes ' . $start . '-' . $end . '/' . $size);
+            header('Content-Length: ' . $length);
+
+            self::outputRange($fullPath, $start, $length);
+            exit;
+        }
+
+        http_response_code(200);
+        header('Content-Length: ' . $size);
+
+        self::outputRange($fullPath, 0, $size);
         exit;
+    }
+
+    /** ارسال تکه‌ای فایل تا حافظه اشغال نشود (مهم برای ویدیوهای چند ده مگابایتی) */
+    private static function outputRange(string $path, int $offset, int $length): void
+    {
+        $handle = fopen($path, 'rb');
+
+        if ($handle === false) {
+            return;
+        }
+
+        if ($offset > 0) {
+            fseek($handle, $offset);
+        }
+
+        $chunkSize = 256 * 1024; // ۲۵۶ کیلوبایت
+        $remaining = $length;
+
+        while ($remaining > 0 && !feof($handle)) {
+            $chunk = fread($handle, (int) min($chunkSize, $remaining));
+
+            if ($chunk === false || $chunk === '') {
+                break;
+            }
+
+            echo $chunk;
+            $remaining -= strlen($chunk);
+
+            if (connection_status() !== CONNECTION_NORMAL) {
+                break;
+            }
+
+            flush();
+        }
+
+        fclose($handle);
     }
 
     public static function delete(int $id): array

@@ -8,8 +8,10 @@ use App\Core\AppException;
 use App\Core\Auth;
 use App\Repositories\ClientRepository;
 use App\Repositories\EnrollmentRepository;
+use App\Repositories\NewsRepository;
 use App\Repositories\PaymentRepository;
 use App\Services\AvatarService;
+use App\Services\MediaService;
 
 /**
  * داده‌های سمت کلاینت (me/*) — کاربر با نقش player (حساب بازیکن) یا coach
@@ -55,14 +57,53 @@ class ClientService
         return ClientRepository::scheduleForUser((int) Auth::id(), (string) Auth::role());
     }
 
+    /**
+     * اخبار مجاز برای این کاربر، همراه با عکس/فیلم هر خبر.
+     * این همان داده‌ای است که اپ بازیکن در اسلایدر داشبورد نشان می‌دهد.
+     */
     public static function news(): array
     {
-        return ClientRepository::publishedNewsForUser((int) Auth::id(), (string) Auth::role());
+        $rows = ClientRepository::publishedNewsForUser((int) Auth::id(), (string) Auth::role());
+
+        return self::attachNewsMedia($rows);
     }
 
     public static function media(): array
     {
-        return ClientRepository::visibleMediaForUser((int) Auth::id(), (string) Auth::role());
+        return MediaService::presentMany(
+            ClientRepository::visibleMediaForUser((int) Auth::id(), (string) Auth::role())
+        );
+    }
+
+    /**
+     * چسباندن رسانه‌ها به اخبار با یک کوئری گروهی (بدون N+1).
+     *
+     * @param array<int, array> $rows
+     * @return array<int, array>
+     */
+    private static function attachNewsMedia(array $rows): array
+    {
+        if (empty($rows)) {
+            return [];
+        }
+
+        $newsIds = [];
+
+        foreach ($rows as $row) {
+            if (isset($row['id'])) {
+                $newsIds[] = (int) $row['id'];
+            }
+        }
+
+        $grouped = NewsRepository::mediaForNewsIds($newsIds);
+
+        foreach ($rows as &$row) {
+            $row['media'] = MediaService::presentMany($grouped[(int) $row['id']] ?? []);
+        }
+
+        unset($row);
+
+        return $rows;
     }
 
     public static function finance(): array

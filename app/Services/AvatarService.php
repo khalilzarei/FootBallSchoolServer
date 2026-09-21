@@ -152,6 +152,24 @@ public static function uploadFromBase64(string $base64String, string $subPath): 
         return self::getDefaultUrl($defaultType);
     }
 
+    /**
+     * نوع آواتار پیش‌فرض بر اساس نقش کاربر.
+     */
+    public static function defaultTypeForRole(?string $role): string
+    {
+        $role = (string) $role;
+
+        if ($role === 'player') {
+            return 'player';
+        }
+
+        if ($role === 'coach') {
+            return 'coach';
+        }
+
+        return 'user';
+    }
+
     private static function getBaseUrl(): string
     {
         $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';

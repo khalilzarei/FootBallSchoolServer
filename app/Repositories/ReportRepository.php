@@ -13,10 +13,10 @@ class ReportRepository
         $pdo = Database::connection();
 
         $stmt = $pdo->prepare('
-            SELECT COUNT(*) AS total_users,
-                   SUM(role = "admin") AS total_admins,
-                   SUM(role = "coach") AS total_coaches,
-                   SUM(role = "player") AS total_guardians
+            SELECT COALESCE(SUM(role <> "player"), 0) AS total_users,
+                   COALESCE(SUM(role = "admin"), 0) AS total_admins,
+                   COALESCE(SUM(role = "coach"), 0) AS total_coaches,
+                   COALESCE(SUM(role = "player"), 0) AS total_guardians
             FROM football_users WHERE status = "active" AND deleted_at IS NULL
         ');
         $stmt->execute();

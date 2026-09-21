@@ -454,4 +454,251 @@ class ChatController
             }
         );
     }
+
+    /**
+     * GET /chat/contacts
+     *
+     * مخاطبین قابل گفتگو برای ادمین
+     * (بازیکنان + مربیان فعال) — فقط ادمین
+     */
+    public function contacts(
+        Request $request,
+        array $params = []
+    ): void {
+        self::runAndRespond(function () {
+            $contacts = ChatService::adminContacts();
+
+            Response::success(
+                'مخاطبین گفتگو',
+                [
+                    'contacts' => $contacts,
+                ]
+            );
+        });
+    }
+
+    /**
+     * PUT /chat/rooms/{id}
+     *
+     * تغییر پروفایل روم (عنوان/تصویر/موضوع) — فقط ادمین
+     */
+    public function updateRoom(
+        Request $request,
+        array $params = []
+    ): void {
+        $roomId = (int) (
+            $params['id'] ?? 0
+        );
+
+        if ($roomId <= 0) {
+            Response::error(
+                'شناسه اتاق چت معتبر نیست',
+                422
+            );
+
+            return;
+        }
+
+        $data = $request->input();
+
+        $errors = Validator::make(
+            $data,
+            [
+                'title' => 'string|max:255',
+
+                'image' => 'string|max:500',
+
+                'subject' => 'string|max:255',
+            ]
+        );
+
+        if (!empty($errors)) {
+            Response::error(
+                'اطلاعات ورودی معتبر نیست',
+                422,
+                $errors
+            );
+
+            return;
+        }
+
+        self::runAndRespond(
+            function () use ($roomId, $data) {
+                $room = ChatService::updateRoom(
+                    $roomId,
+                    $data
+                );
+
+                Response::success(
+                    'گفتگو به‌روزرسانی شد',
+                    [
+                        'room' => $room,
+                    ]
+                );
+            }
+        );
+    }
+
+    /**
+     * POST /chat/rooms/{id}/members
+     *
+     * افزودن عضو — فقط ادمین
+     *
+     * { "user_ids": [2, 5, 9] }
+     */
+    public function addMembers(
+        Request $request,
+        array $params = []
+    ): void {
+        $roomId = (int) (
+            $params['id'] ?? 0
+        );
+
+        if ($roomId <= 0) {
+            Response::error(
+                'شناسه اتاق چت معتبر نیست',
+                422
+            );
+
+            return;
+        }
+
+        $data = $request->input();
+
+        self::runAndRespond(
+            function () use ($roomId, $data) {
+                $room = ChatService::addMembers(
+                    $roomId,
+                    $data
+                );
+
+                Response::success(
+                    'اعضا اضافه شدند',
+                    [
+                        'room' => $room,
+                    ]
+                );
+            }
+        );
+    }
+
+    /**
+     * DELETE /chat/rooms/{id}/members/{userId}
+     *
+     * حذف عضو — فقط ادمین
+     */
+    public function removeMember(
+        Request $request,
+        array $params = []
+    ): void {
+        $roomId = (int) (
+            $params['id'] ?? 0
+        );
+
+        $userId = (int) (
+            $params['userId'] ?? 0
+        );
+
+        if ($roomId <= 0 || $userId <= 0) {
+            Response::error(
+                'شناسه معتبر نیست',
+                422
+            );
+
+            return;
+        }
+
+        self::runAndRespond(
+            function () use ($roomId, $userId) {
+                $room = ChatService::removeMember(
+                    $roomId,
+                    $userId
+                );
+
+                Response::success(
+                    'عضو حذف شد',
+                    [
+                        'room' => $room,
+                    ]
+                );
+            }
+        );
+    }
+
+    /**
+     * DELETE /chat/rooms/{id}
+     *
+     * حذف (غیرفعال‌سازی) روم — فقط ادمین
+     */
+    public function deleteRoom(
+        Request $request,
+        array $params = []
+    ): void {
+        $roomId = (int) (
+            $params['id'] ?? 0
+        );
+
+        if ($roomId <= 0) {
+            Response::error(
+                'شناسه اتاق چت معتبر نیست',
+                422
+            );
+
+            return;
+        }
+
+        self::runAndRespond(
+            function () use ($roomId) {
+                $result = ChatService::deleteRoom(
+                    $roomId
+                );
+
+                Response::success(
+                    'گفتگو حذف شد',
+                    $result
+                );
+            }
+        );
+    }
+
+    /**
+     * DELETE /chat/rooms/{id}/messages/{messageId}
+     *
+     * خودِ فرستنده یا ادمین
+     */
+    public function deleteMessage(
+        Request $request,
+        array $params = []
+    ): void {
+        $roomId = (int) (
+            $params['id'] ?? 0
+        );
+
+        $messageId = (int) (
+            $params['messageId'] ?? 0
+        );
+
+        if ($roomId <= 0 || $messageId <= 0) {
+            Response::error(
+                'شناسه معتبر نیست',
+                422
+            );
+
+            return;
+        }
+
+        self::runAndRespond(
+            function () use ($roomId, $messageId) {
+                $result = ChatService::deleteMessage(
+                    $roomId,
+                    $messageId
+                );
+
+                Response::success(
+                    'پیام حذف شد',
+                    $result
+                );
+            }
+        );
+    }
 }

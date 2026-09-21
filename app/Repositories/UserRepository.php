@@ -41,6 +41,10 @@ class UserRepository
             $where[] = 'u.role = :role';
             $params['role'] = $filters['role'];
         }
+        if (!empty($filters['exclude_role'])) {
+            $where[] = 'u.role <> :exclude_role';
+            $params['exclude_role'] = $filters['exclude_role'];
+        }
         if (!empty($filters['status'])) {
             $where[] = 'u.status = :status';
             $params['status'] = $filters['status'];

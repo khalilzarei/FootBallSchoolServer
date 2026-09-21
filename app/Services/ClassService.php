@@ -91,6 +91,15 @@ class ClassService
             'created_by' => Auth::id(),
         ]);
 
+        /*
+         * ساخت خودکار روم چت کلاس.
+         * (idempotent و safe — خطای چت ساخت کلاس را خراب نمی‌کند)
+         */
+        ChatService::ensureClassRoom(
+            $classId,
+            Auth::id()
+        );
+
         return self::requireClass($classId);
     }
 
@@ -153,6 +162,9 @@ class ClassService
         self::assertDateRange($fs, $fe);
 
         if (!empty($updateData)) ClassRepository::update($id, $updateData);
+
+        /* همگام‌سازی روم چت کلاس (عنوان/مربی‌ها/اعضا) */
+        ChatService::ensureClassRoom($id, Auth::id());
 
         return self::requireClass($id);
     }

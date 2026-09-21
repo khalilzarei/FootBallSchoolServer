@@ -54,6 +54,34 @@ class MediaController
         }
     }
 
+    /**
+     * پخش درون‌خطی (بدون Content-Disposition: attachment).
+     * برای نمایش عکس در اسلایدر اخبار و پخش ویدیو در player.
+     * با پشتیبانی از هدر Range برای seek کردن در ویدیو.
+     */
+    public function stream(Request $request, array $params = []): void
+    {
+        $id = (int) ($params['id'] ?? 0);
+
+        try {
+            MediaService::stream($id);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
+    /** نمایش thumbnail با کنترل دسترسی API */
+    public function thumbnail(Request $request, array $params = []): void
+    {
+        $id = (int) ($params['id'] ?? 0);
+
+        try {
+            MediaService::thumbnail($id);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
     public function setAudiences(Request $request, array $params = []): void
     {
         $id = (int) ($params['id'] ?? 0);

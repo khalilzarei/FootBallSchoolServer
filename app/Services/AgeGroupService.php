@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Core\AppException;
+use App\Core\Auth;
 use App\Repositories\AgeGroupRepository;
 use DateTime;
 
@@ -74,6 +75,15 @@ class AgeGroupService
             'status' => $status,
         ]);
 
+        /*
+         * ساخت خودکار روم چت گروه سنی.
+         * (idempotent و safe — خطای چت ساخت گروه را خراب نمی‌کند)
+         */
+        ChatService::ensureAgeGroupRoom(
+            $ageGroupId,
+            Auth::id()
+        );
+
         return self::requireAgeGroup($ageGroupId);
     }
 
@@ -122,6 +132,9 @@ class AgeGroupService
         }
 
         if (!empty($updateData)) AgeGroupRepository::update($id, $updateData);
+
+        /* همگام‌سازی روم چت گروه سنی (عنوان/اعضا) */
+        ChatService::ensureAgeGroupRoom($id, Auth::id());
 
         return self::requireAgeGroup($id);
     }
