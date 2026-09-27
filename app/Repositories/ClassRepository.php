@@ -27,7 +27,11 @@ class ClassRepository
         }
 
         if (!empty($filters['age_group_id'])) {
-            $where[] = 'c.age_group_id = :age_group_id';
+            // کلاس‌هایی که این گروه سنی در میان گروه‌هایشان باشد (چند گروه = چند انتخاب)
+            $where[] = 'EXISTS (
+                SELECT 1 FROM football_class_age_groups cagf
+                WHERE cagf.class_id = c.id AND cagf.age_group_id = :age_group_id
+            )';
             $params['age_group_id'] = $filters['age_group_id'];
         }
 
@@ -69,6 +73,9 @@ class ClassRepository
         }
         unset($item);
 
+        // گروه‌های سنی هر کلاس (چندبه‌چند) — تک کوئری
+        self::attachAgeGroups($items);
+
         return [
             'items' => $items,
             'total' => $total,
@@ -97,6 +104,10 @@ class ClassRepository
         $class = self::hydrate($class);
         $class['schedules'] = ClassScheduleRepository::forClass($id);
 
+        $single = [$class];
+        self::attachAgeGroups($single);
+        $class = $single[0];
+
         return $class;
     }
 
@@ -107,19 +118,25 @@ class ClassRepository
         $stmt = $pdo->prepare('
             INSERT INTO football_classes (
                 title, season_id, age_group_id, coach_id, assistant_coach_id, capacity, status,
-                location, description, pricing_type, monthly_fee, session_fee,
+                location, description, pricing_type, billing_cycle, monthly_fee, seasonal_fee, billing_months, session_fee,
                 registration_fee, start_date, end_date, created_by, created_at
             ) VALUES (
                 :title, :season_id, :age_group_id, :coach_id, :assistant_coach_id, :capacity, :status,
-                :location, :description, :pricing_type, :monthly_fee, :session_fee,
+                :location, :description, :pricing_type, :billing_cycle, :monthly_fee, :seasonal_fee, :billing_months, :session_fee,
                 :registration_fee, :start_date, :end_date, :created_by, NOW()
             )
         ');
 
+        // گروه‌های سنی چندتایی + ستون سازگاری (اولین گروه)
+        $ageGroupIds = self::normalizeAgeGroupIds($data['age_group_ids'] ?? []);
+        if (empty($ageGroupIds) && !empty($data['age_group_id'])) {
+            $ageGroupIds = [(int) $data['age_group_id']];
+        }
+
         $stmt->execute([
             'title' => $data['title'],
             'season_id' => $data['season_id'] ?? null,
-            'age_group_id' => $data['age_group_id'] ?? null,
+            'age_group_id' => $ageGroupIds[0] ?? null,
             'coach_id' => $data['coach_id'] ?? null,
             'assistant_coach_id' => $data['assistant_coach_id'] ?? null,
             'capacity' => $data['capacity'] ?? null,
@@ -127,7 +144,10 @@ class ClassRepository
             'location' => $data['location'] ?? null,
             'description' => $data['description'] ?? null,
             'pricing_type' => $data['pricing_type'] ?? 'monthly',
+            'billing_cycle' => $data['billing_cycle'] ?? 'monthly',
             'monthly_fee' => $data['monthly_fee'] ?? 0,
+            'seasonal_fee' => $data['seasonal_fee'] ?? 0,
+            'billing_months' => $data['billing_months'] ?? (($data['billing_cycle'] ?? 'monthly') === 'seasonal' ? 3 : 1),
             'session_fee' => $data['session_fee'] ?? 0,
             'registration_fee' => $data['registration_fee'] ?? 0,
             'start_date' => $data['start_date'] ?? null,
@@ -135,19 +155,116 @@ class ClassRepository
             'created_by' => $data['created_by'] ?? null,
         ]);
 
-        return (int) $pdo->lastInsertId();
+        $classId = (int) $pdo->lastInsertId();
+
+        self::setAgeGroups($classId, $ageGroupIds);
+
+        return $classId;
+    }
+
+    /**
+     * جایگزینی کامل گروه‌های سنی یک کلاس (چندبه‌چند)
+     * ستون سازگاری football_classes.age_group_id هم با اولین گروه همگام می‌شود
+     */
+    public static function setAgeGroups(int $classId, array $ageGroupIds): void
+    {
+        $pdo = Database::connection();
+
+        $pdo->prepare('DELETE FROM football_class_age_groups WHERE class_id = :class_id')
+            ->execute(['class_id' => $classId]);
+
+        $ids = self::normalizeAgeGroupIds($ageGroupIds);
+
+        $insert = $pdo->prepare('
+            INSERT IGNORE INTO football_class_age_groups (class_id, age_group_id)
+            VALUES (:class_id, :age_group_id)
+        ');
+
+        foreach ($ids as $gid) {
+            $insert->execute(['class_id' => $classId, 'age_group_id' => $gid]);
+        }
+
+        $pdo->prepare('UPDATE football_classes SET age_group_id = :ag WHERE id = :id')
+            ->execute(['ag' => $ids[0] ?? null, 'id' => $classId]);
+    }
+
+    private static function normalizeAgeGroupIds(array $ids): array
+    {
+        $result = [];
+        foreach ($ids as $id) {
+            if (filter_var($id, FILTER_VALIDATE_INT) !== false && (int) $id > 0) {
+                $result[(int) $id] = (int) $id;
+            }
+        }
+        return array_values($result);
+    }
+
+    /**
+     * افزودن age_group_ids / age_groups به آرایه‌ی کلاس‌ها (تک کوئری)
+     */
+    private static function attachAgeGroups(array &$classes): void
+    {
+        if (empty($classes)) return;
+
+        $pdo = Database::connection();
+        $ids = array_map('intval', array_column($classes, 'id'));
+        $in = implode(',', $ids);
+
+        $stmt = $pdo->prepare("
+            SELECT cag.class_id, ag.*
+            FROM football_class_age_groups cag
+            INNER JOIN football_age_groups ag ON ag.id = cag.age_group_id
+            WHERE cag.class_id IN ($in)
+            ORDER BY ag.sort_order, ag.id
+        ");
+        $stmt->execute();
+
+        $byClass = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $cid = (int) $row['class_id'];
+            $byClass[$cid][] = [
+                'id' => (int) $row['id'],
+                'title' => $row['title'],
+                'birth_date_from' => $row['birth_date_from'],
+                'birth_date_to' => $row['birth_date_to'],
+                'min_age_at_cutoff' => $row['min_age_at_cutoff'] !== null ? (int) $row['min_age_at_cutoff'] : null,
+                'max_age_at_cutoff' => $row['max_age_at_cutoff'] !== null ? (int) $row['max_age_at_cutoff'] : null,
+                'sort_order' => (int) $row['sort_order'],
+                'status' => $row['status'],
+                'is_active' => ((string) $row['status']) === 'active',
+            ];
+        }
+
+        foreach ($classes as &$cls) {
+            $cid = (int) $cls['id'];
+            $groups = $byClass[$cid] ?? [];
+            $cls['age_groups'] = $groups;
+            $cls['age_group_ids'] = array_map(static fn (array $g): int => $g['id'], $groups);
+        }
+        unset($cls);
     }
 
     public static function update(int $id, array $data): void
     {
         $pdo = Database::connection();
 
+        // گروه‌های سنی (چندبه‌چند) — قبل از بقیه فیلدها؛ حتی اگر فیلد دیگری نباشد
+        if (array_key_exists('age_group_ids', $data)) {
+            self::setAgeGroups($id, $data['age_group_ids']);
+        } elseif (array_key_exists('age_group_id', $data)) {
+            // سازگاری با کلاینت قدیمی: یک گروه = جایگزینی کل لیست
+            self::setAgeGroups(
+                $id,
+                $data['age_group_id'] !== null ? [(int) $data['age_group_id']] : []
+            );
+        }
+
         $sets = [];
         $params = ['id' => $id];
 
         $allowedFields = [
-            'title', 'season_id', 'age_group_id', 'coach_id', 'assistant_coach_id', 'capacity',
-            'status', 'location', 'description', 'pricing_type', 'monthly_fee',
+            'title', 'season_id', 'coach_id', 'assistant_coach_id', 'capacity',
+            'status', 'location', 'description', 'pricing_type', 'billing_cycle', 'monthly_fee', 'seasonal_fee', 'billing_months',
             'session_fee', 'registration_fee', 'start_date', 'end_date',
         ];
 
@@ -281,11 +398,25 @@ class ClassRepository
         $row['is_active'] = ((int) ($row['is_active'] ?? 0)) === 1;
         $row['enrolled_count'] = (int) ($row['enrolled_count'] ?? 0);
 
-        foreach (['season_id', 'age_group_id', 'coach_id', 'assistant_coach_id', 'capacity', 'created_by'] as $field) {
+        foreach (['season_id', 'age_group_id', 'coach_id', 'assistant_coach_id', 'capacity', 'created_by', 'billing_months'] as $field) {
             if (isset($row[$field]) && $row[$field] !== null) {
                 $row[$field] = (int) $row[$field];
             }
         }
+
+        // سازگاری با دیتابیس قدیمی که ستون‌های جدید را ندارد
+        if (!isset($row['billing_cycle']) || $row['billing_cycle'] === null || $row['billing_cycle'] === '') {
+            $row['billing_cycle'] = 'monthly';
+        }
+        if (!isset($row['seasonal_fee'])) $row['seasonal_fee'] = 0;
+        if (!isset($row['billing_months']) || $row['billing_months'] <= 0) {
+            $row['billing_months'] = $row['billing_cycle'] === 'seasonal' ? 3 : 1;
+        }
+        // تبدیل به int
+        $row['monthly_fee'] = isset($row['monthly_fee']) ? (int) $row['monthly_fee'] : 0;
+        $row['seasonal_fee'] = isset($row['seasonal_fee']) ? (int) $row['seasonal_fee'] : 0;
+        $row['session_fee'] = isset($row['session_fee']) ? (int) $row['session_fee'] : 0;
+        $row['registration_fee'] = isset($row['registration_fee']) ? (int) $row['registration_fee'] : 0;
 
         $row['age_group'] = !empty($row['ag_id']) ? [
             'id' => (int) $row['ag_id'],

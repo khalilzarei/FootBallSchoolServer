@@ -41,6 +41,17 @@ class ClientController
         }
     }
 
+    public function newsDetail(Request $request, array $params = []): void
+    {
+        $id = (int) ($params['id'] ?? 0);
+        try {
+            $news = ClientService::newsDetail($id);
+            Response::success('جزئیات خبر', ['news' => $news]);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
     public function media(Request $request, array $params = []): void
     {
         try {
@@ -89,6 +100,68 @@ class ClientController
         try {
             $contacts = ClientService::chatContacts();
             Response::success('مخاطبین گفتگو', ['contacts' => $contacts]);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
+    public function profile(Request $request, array $params = []): void
+    {
+        try {
+            $data = ClientService::profile();
+            Response::success('پروفایل', $data);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
+    public function updateProfile(Request $request, array $params = []): void
+    {
+        try {
+            $data = ClientService::updateOwnProfile($request->input());
+            Response::success('پروفایل به‌روزرسانی شد', $data);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
+    public function updateChild(Request $request, array $params = []): void
+    {
+        $id = (int) ($params['id'] ?? 0);
+        try {
+            $data = ClientService::updateOwnChild($id, $request->input());
+            Response::success('اطلاعات بازیکن به‌روزرسانی شد', $data);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
+    public function guardians(Request $request, array $params = []): void
+    {
+        try {
+            $data = ClientService::guardians();
+            Response::success('سرپرستان', ['guardians' => $data]);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
+    public function updateGuardian(Request $request, array $params = []): void
+    {
+        $id = (int) ($params['id'] ?? 0);
+        try {
+            $data = ClientService::updateOwnGuardian($id, $request->input());
+            Response::success('سرپرست به‌روزرسانی شد', $data);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
+    public function evaluations(Request $request, array $params = []): void
+    {
+        try {
+            $data = ClientService::evaluations();
+            Response::success('ارزیابی‌ها', ['evaluations' => $data]);
         } catch (AppException $e) {
             Response::error($e->getMessage(), $e->getCode() ?: 400);
         }

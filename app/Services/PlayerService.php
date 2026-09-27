@@ -39,17 +39,26 @@ class PlayerService
             'q' => $q !== '' ? $q : null,
         ], $page, $perPage);
 
-        // افزودن avatar_url، سرپرست‌ها و کلاس فعلی به تمام آیتم‌های لیست
-        // (سرپرست‌ها برای دکمه‌های تماس/پیام؛ کلاس فعلی برای نمایش «کلاس: ...»)
+        // افزودن avatar_url، سرپرست‌ها، کلاس فعلی و وضعیت مالی به تمام آیتم‌های لیست
         $playerIds = array_map(fn($p) => (int) $p['id'], $result['items']);
         $guardiansByPlayer = self::guardiansByPlayerId($playerIds);
         $currentClassByPlayer = EnrollmentRepository::currentClassByPlayerIds($playerIds);
+        $balancesByPlayer = \App\Repositories\PaymentRepository::balancesForPlayerIds($playerIds);
 
         $result['items'] = array_map(
             fn($player) => self::addAvatarUrl(
                 $player + [
                     'guardians' => $guardiansByPlayer[(int) $player['id']] ?? [],
                     'current_class' => $currentClassByPlayer[(int) $player['id']] ?? null,
+                    'balance' => $balancesByPlayer[(int) $player['id']] ?? [
+                        'player_id' => (int) $player['id'],
+                        'debt' => 0,
+                        'total_invoiced' => 0,
+                        'total_paid' => 0,
+                        'balance' => 0,
+                        'is_debtor' => false,
+                        'open_invoices' => 0,
+                    ],
                 ]
             ),
             $result['items']
@@ -84,6 +93,13 @@ class PlayerService
             if (PlayerRepository::existsByNationalCode($nationalCode)) throw new AppException('این کد ملی قبلاً ثبت شده است', 422);
         }
 
+        $mobile = trim((string) ($data['mobile'] ?? '')) ?: null;
+        if ($mobile !== null) {
+            if (!preg_match('/^[0-9]{10,15}$/', $mobile)) throw new AppException('شماره موبایل معتبر نیست', 422);
+            if (PlayerRepository::existsByMobile($mobile)) throw new AppException('این شماره موبایل متعلق به بازیکن دیگری است', 422);
+            if (UserRepository::existsByMobile($mobile)) throw new AppException('این شماره موبایل قبلاً ثبت شده است', 422);
+        }
+
         $status = (string) ($data['status'] ?? 'active');
         if (!in_array($status, self::STATUSES, true)) throw new AppException('وضعیت بازیکن معتبر نیست', 422);
 
@@ -97,6 +113,7 @@ class PlayerService
             'first_name' => $firstName,
             'last_name' => $lastName,
             'national_code' => $nationalCode,
+            'mobile' => $mobile,
             'birth_date' => $birthDate,
             'gender' => $gender,
             'avatar_path' => $avatarPath, // ← ذخیره مسیر آواتار
@@ -107,7 +124,7 @@ class PlayerService
         ]);
 
         // حساب ورود بازیکن (اگر کد ملی دارد) — کاربر با نقش player؛ شناسه ورود = کد ملی
-        self::createPlayerLogin($playerId, $firstName . ' ' . $lastName, $nationalCode);
+        self::createPlayerLogin($playerId, $firstName . ' ' . $lastName, $nationalCode, $mobile);
 
         return self::get($playerId);
     }
@@ -143,6 +160,15 @@ class PlayerService
         if (array_key_exists('national_code', $data)) {
             $updateData['national_code'] = trim((string) $data['national_code']) ?: null;
         }
+        if (array_key_exists('mobile', $data)) {
+            $v = trim((string) $data['mobile']);
+            if ($v === '') {
+                $updateData['mobile'] = null;
+            } else {
+                if (!preg_match('/^[0-9]{10,15}$/', $v)) throw new AppException('شماره موبایل معتبر نیست', 422);
+                $updateData['mobile'] = $v;
+            }
+        }
         if (array_key_exists('medical_notes', $data)) {
             $updateData['medical_notes'] = trim((string) $data['medical_notes']) ?: null;
         }
@@ -170,12 +196,23 @@ class PlayerService
             if (PlayerRepository::existsByNationalCode($finalNC, $id)) throw new AppException('کد ملی تکراری است', 422);
         }
 
+        $finalMobile = $updateData['mobile'] ?? $player['mobile'];
+        if ($finalMobile !== null && $finalMobile !== '') {
+            if (PlayerRepository::existsByMobile($finalMobile, $id)) {
+                throw new AppException('این شماره موبایل متعلق به بازیکن دیگری است', 422);
+            }
+            $linkedUserId = $player['user_id'] ?? null;
+            if (UserRepository::existsByMobile($finalMobile, $linkedUserId !== null ? (int) $linkedUserId : null)) {
+                throw new AppException('این شماره موبایل قبلاً ثبت شده است', 422);
+            }
+        }
+
         if (!empty($updateData)) {
             PlayerRepository::update($id, $updateData);
         }
 
-        // همگام‌سازی حساب ورود بازیکن با تغییرات (نام/کد ملی) — و ساخت حساب اگر هنوز ندارد
-        self::syncPlayerLogin($id, $player, $updateData, $finalNC);
+        // همگام‌سازی حساب ورود بازیکن با تغییرات (نام/کد ملی/موبایل) — و ساخت حساب اگر هنوز ندارد
+        self::syncPlayerLogin($id, $player, $updateData, $finalNC, $finalMobile);
 
         return self::get($id);
     }
@@ -361,7 +398,7 @@ class PlayerService
      * شناسه ورود و رمز اولیه = کد ملی بازیکن؛ بدون کد ملی حساب ساخته نمی‌شود.
      * must_change_password=1 است تا در اولین ورود رمز عوض شود.
      */
-    private static function createPlayerLogin(int $playerId, string $fullName, ?string $nationalCode): void
+    private static function createPlayerLogin(int $playerId, string $fullName, ?string $nationalCode, ?string $mobile = null): void
     {
         if ($nationalCode === null) return;
 
@@ -376,6 +413,10 @@ class PlayerService
                 'user_id' => (int) $existing['id'],
                 'password_hash' => (string) $existing['password_hash'],
             ]);
+            // اگر حساب کاربری موبایل ندارد ولی بازیکن موبایل دارد → ثبت موبایل (برای چت/تماس)
+            if ($mobile !== null && empty($existing['mobile'])) {
+                UserRepository::update((int) $existing['id'], ['mobile' => $mobile]);
+            }
             return;
         }
 
@@ -384,7 +425,7 @@ class PlayerService
 
         $userId = UserRepository::create([
             'full_name' => $fullName,
-            'mobile' => null,
+            'mobile' => $mobile,
             'national_code' => $nationalCode,
             'avatar_path' => null,
             'password_hash' => $passwordHash,
@@ -405,7 +446,7 @@ class PlayerService
      * - حساب ندارد و حالا کد ملی گرفته → حساب ساخته می‌شود (رمز اولیه برمی‌گردد)
      * - حساب دارد → نام/کد ملی حساب با بازیکن همگام می‌شود؛ کد ملیِ خالی = قطع ورود
      */
-    private static function syncPlayerLogin(int $playerId, array $oldPlayer, array $updateData, ?string $finalNC): void
+    private static function syncPlayerLogin(int $playerId, array $oldPlayer, array $updateData, ?string $finalNC, ?string $finalMobile = null): void
     {
         $current = PlayerRepository::findById($playerId);
         if (!$current) return;
@@ -418,11 +459,11 @@ class PlayerService
         // هنوز حساب ندارد → اگر حالا کد ملی دارد، بساز
         if (empty($userId)) {
             if ($finalNC === null) return;
-            self::createPlayerLogin($playerId, $fullName, $finalNC);
+            self::createPlayerLogin($playerId, $fullName, $finalNC, $finalMobile);
             return;
         }
 
-        // حساب دارد → همگام‌سازی نام و کد ملی
+        // حساب دارد → همگام‌سازی نام، کد ملی و موبایل
         $userUpdate = [];
         if (array_key_exists('first_name', $updateData) || array_key_exists('last_name', $updateData)) {
             $userUpdate['full_name'] = $fullName;
@@ -434,6 +475,9 @@ class PlayerService
             $userUpdate['national_code'] = null;
             PlayerRepository::update($playerId, ['password_hash' => null]);
         }
+        // موبایل همیشه همگام می‌شود (برای چت/تماس) — تکراری بودن قبل از فراخوانی چک شده
+        $userUpdate['mobile'] = $finalMobile;
+
         if (!empty($userUpdate)) {
             UserRepository::update((int) $userId, $userUpdate);
         }

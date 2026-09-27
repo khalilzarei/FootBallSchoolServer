@@ -148,7 +148,14 @@ class InvoiceRepository
     {
         $pdo = Database::connection();
 
-        $stmt = $pdo->prepare('SELECT * FROM football_invoice_items WHERE invoice_id = :invoice_id ORDER BY id ASC');
+        $stmt = $pdo->prepare('
+            SELECT ii.*, c.title AS class_title, ag.title AS age_group_title
+            FROM football_invoice_items ii
+            LEFT JOIN football_classes c ON c.id = ii.class_id
+            LEFT JOIN football_age_groups ag ON ag.id = c.age_group_id
+            WHERE ii.invoice_id = :invoice_id
+            ORDER BY ii.id ASC
+        ');
         $stmt->execute(['invoice_id' => $invoiceId]);
 
         return $stmt->fetchAll();

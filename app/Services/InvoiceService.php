@@ -14,8 +14,8 @@ use DateTime;
 
 class InvoiceService
 {
-    private const INVOICE_TYPES = ['monthly', 'session', 'registration', 'manual', 'match'];
-    private const ITEM_TYPES = ['registration', 'monthly', 'session', 'manual', 'match'];
+    private const INVOICE_TYPES = ['monthly', 'seasonal', 'session', 'registration', 'manual', 'match'];
+    private const ITEM_TYPES = ['registration', 'monthly', 'seasonal', 'session', 'manual', 'match'];
     private const DISCOUNT_TYPES = ['percent', 'fixed'];
 
     public static function list(array $query): array
@@ -25,12 +25,94 @@ class InvoiceService
         if ($perPage < 1) $perPage = 20;
         if ($perPage > 100) $perPage = 100;
 
-        return InvoiceRepository::paginate([
+        $result = InvoiceRepository::paginate([
             'player_id' => (int) ($query['player_id'] ?? 0) > 0 ? (int) $query['player_id'] : null,
             'status' => trim((string) ($query['status'] ?? '')) ?: null,
             'invoice_type' => trim((string) ($query['invoice_type'] ?? '')) ?: null,
             'q' => trim((string) ($query['q'] ?? '')) ?: null,
         ], $page, $perPage);
+
+        // هیدرات کردن برای اپ اندروید: total_amount, paid_amount, remaining_amount, player object, items, class_debts
+        $result['items'] = array_map(function($row) {
+            $player = null;
+            if (!empty($row['player_id'])) {
+                $first = $row['first_name'] ?? '';
+                $last = $row['last_name'] ?? '';
+                $full = trim($first . ' ' . $last);
+                if ($full === '') $full = 'بازیکن #' . $row['player_id'];
+                $player = [
+                    'id' => (int) $row['player_id'],
+                    'first_name' => $first,
+                    'last_name' => $last,
+                    'full_name' => $full,
+                ];
+            }
+
+            // نگاشت فیلدهای قدیمی به جدید برای سازگاری با اپ
+            $subtotal = (int) ($row['subtotal'] ?? 0);
+            $paid = (int) ($row['paid_total'] ?? 0);
+            $remaining = (int) ($row['remaining_total'] ?? 0);
+            $total = $subtotal; // کل فاکتور قبل از تخفیف، اما برای اپ total_amount = subtotal
+
+            return [
+                'id' => (int) $row['id'],
+                'invoice_number' => $row['invoice_number'] ?? '',
+                'player_id' => (int) $row['player_id'],
+                'player' => $player,
+                'invoice_type' => $row['invoice_type'] ?? 'manual',
+                'period_start_date' => $row['period_start_date'] ?? null,
+                'period_end_date' => $row['period_end_date'] ?? null,
+                'due_date' => $row['due_date'] ?? null,
+                'status' => $row['status'] ?? 'open',
+                'subtotal' => $subtotal,
+                'discount_total' => (int) ($row['discount_total'] ?? 0),
+                'paid_total' => $paid,
+                'remaining_total' => $remaining,
+                'total_amount' => $subtotal,
+                'paid_amount' => $paid,
+                'remaining_amount' => $remaining,
+                'notes' => $row['notes'] ?? null,
+                'is_debtor' => $remaining > 0,
+                // برای لیست، آیتم‌ها را هم می‌گیریم تا کلاس تفکیک شود
+                'items' => \App\Repositories\InvoiceRepository::items((int) $row['id']),
+                'created_at' => $row['created_at'] ?? null,
+                'updated_at' => $row['updated_at'] ?? null,
+            ];
+        }, $result['items']);
+
+        // اضافه کردن class_debts برای هر فاکتور با توزیع paid/remaining
+        foreach ($result['items'] as &$inv) {
+            $classMap = [];
+            $subtotal = (int) ($inv['subtotal'] ?? 0);
+            $paid = (int) ($inv['paid_total'] ?? 0);
+            $remaining = (int) ($inv['remaining_total'] ?? 0);
+            $invTotal = $subtotal > 0 ? $subtotal : 1;
+
+            foreach ($inv['items'] as $it) {
+                $cid = $it['class_id'] ? (int)$it['class_id'] : 0;
+                $key = $cid !== 0 ? $cid : -1;
+                if (!isset($classMap[$key])) {
+                    $classMap[$key] = [
+                        'class_id' => $cid !== 0 ? $cid : null,
+                        'class_title' => $it['class_title'] ?? ($cid === 0 ? 'سایر' : 'کلاس #'.$cid),
+                        'age_group_title' => $it['age_group_title'] ?? null,
+                        'total' => 0,
+                        'paid' => 0,
+                        'remaining' => 0,
+                        'items_count' => 0,
+                    ];
+                }
+                $classMap[$key]['total'] += (int) $it['total'];
+                $classMap[$key]['items_count']++;
+                $ratio = (int)$it['total'] / $invTotal;
+                $classMap[$key]['paid'] += (int) round($paid * $ratio);
+                $classMap[$key]['remaining'] += (int) round($remaining * $ratio);
+            }
+            $inv['class_debts'] = array_values($classMap);
+        }
+        unset($inv);
+
+        return $result;
     }
 
     public static function getDetailed(int $id): array
@@ -39,6 +121,64 @@ class InvoiceService
         $invoice['items'] = InvoiceRepository::items($id);
         $invoice['discounts'] = InvoiceRepository::discounts($id);
         $invoice['installments'] = InvoiceRepository::installments($id);
+
+        // نگاشت برای اپ
+        $subtotal = (int) ($invoice['subtotal'] ?? 0);
+        $paid = (int) ($invoice['paid_total'] ?? 0);
+        $remaining = (int) ($invoice['remaining_total'] ?? 0);
+
+        $first = $invoice['first_name'] ?? '';
+        $last = $invoice['last_name'] ?? '';
+        $full = trim($first . ' ' . $last);
+        if ($full === '') $full = 'بازیکن #' . $invoice['player_id'];
+
+        $invoice['player'] = [
+            'id' => (int) $invoice['player_id'],
+            'first_name' => $first,
+            'last_name' => $last,
+            'full_name' => $full,
+        ];
+
+        $invoice['total_amount'] = $subtotal;
+        $invoice['paid_amount'] = $paid;
+        $invoice['remaining_amount'] = $remaining;
+        $invoice['is_debtor'] = $remaining > 0;
+
+        // class_debts
+        $classMap = [];
+        foreach ($invoice['items'] as $it) {
+            $cid = $it['class_id'] ? (int)$it['class_id'] : 0;
+            $key = $cid !== 0 ? $cid : -1;
+            if (!isset($classMap[$key])) {
+                $classMap[$key] = [
+                    'class_id' => $cid !== 0 ? $cid : null,
+                    'class_title' => $it['class_title'] ?? ($cid === 0 ? 'سایر' : 'کلاس #'.$cid),
+                    'age_group_title' => $it['age_group_title'] ?? null,
+                    'total' => 0,
+                    'paid' => 0,
+                    'remaining' => 0,
+                ];
+            }
+            $classMap[$key]['total'] += (int) $it['total'];
+        }
+        // توزیع paid/remaining بر اساس نسبت
+        $invTotal = $subtotal > 0 ? $subtotal : 1;
+        foreach ($invoice['items'] as $it) {
+            $cid = $it['class_id'] ? (int)$it['class_id'] : 0;
+            $key = $cid !== 0 ? $cid : -1;
+            if (!isset($classMap[$key])) continue;
+            $ratio = (int)$it['total'] / $invTotal;
+            $classMap[$key]['paid'] += (int) round($paid * $ratio);
+            $classMap[$key]['remaining'] += (int) round($remaining * $ratio);
+        }
+        $invoice['class_debts'] = array_values($classMap);
+
+        // پرداخت‌ها
+        $pdo = \App\Core\Database::connection();
+        $stmt = $pdo->prepare("SELECT * FROM football_payments WHERE invoice_id = :inv_id ORDER BY id DESC");
+        $stmt->execute(['inv_id' => $id]);
+        $invoice['payments'] = $stmt->fetchAll();
+
         return $invoice;
     }
 

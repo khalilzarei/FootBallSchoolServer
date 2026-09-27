@@ -94,6 +94,18 @@ class ChatService
         foreach ($rooms as $room) {
             $roomId = (int) $room['id'];
 
+            /*
+             * اگر کاربر پیام خوانده‌نشدنی در این اتاق دارد، یعنی اپِ او
+             * پیام‌ها را دریافت کرده است → پیام‌های طرف مقابل
+             * «تحویل‌شده» می‌شوند (تیک ✓✓ در سمت فرستنده).
+             */
+            if (((int) ($unreadCounts[$roomId] ?? 0)) > 0) {
+                ChatRepository::markMessagesDelivered(
+                    $roomId,
+                    $currentUserId
+                );
+            }
+
             $result[] = self::hydrateRoom(
                 $room,
                 ChatRepository::members($roomId),
@@ -284,30 +296,72 @@ class ChatService
         );
 
         /*
+         * اتاقی با همین unique_key قبلاً ساخته شده (مثلاً با اسکیمای قدیمی که
+         * findPrivateRoom آن را نمی‌بیند) → به‌جای INSERT که با خطای
+         * Integrity constraint (1062) شکست می‌خورد، همان اتاق بازمی‌گردد.
+         */
+        $roomByKey = ChatRepository::findByUniqueKey($uniqueKey);
+        if ($roomByKey) {
+            $roomId = (int) $roomByKey['id'];
+
+            // اگر اتاق غیرفعال شده بود، دوباره فعال می‌شود
+            if ((string) ($roomByKey['status'] ?? 'active') !== 'active') {
+                ChatRepository::setRoomStatus($roomId, 'active');
+            }
+
+            if (!ChatRepository::memberExists($roomId, $currentUserId)) {
+                ChatRepository::addMember($roomId, $currentUserId, 'owner');
+            }
+            if (!ChatRepository::memberExists($roomId, $targetUserId)) {
+                ChatRepository::addMember($roomId, $targetUserId, 'member');
+            }
+            if ($playerId !== null) {
+                ChatRepository::updateRoomPlayer($roomId, $playerId);
+            }
+
+            return self::roomDetails($roomId);
+        }
+
+        /*
          * برای سازگاری با دیتابیس‌های قدیمی،
          * room_type همچنان مقدار private می‌گیرد.
          */
-        $roomId = ChatRepository::createRoom([
-            'room_type' => 'private',
-            'is_group' => false,
+        try {
+            $roomId = ChatRepository::createRoom([
+                'room_type' => 'private',
+                'is_group' => false,
 
-            'user1_id' => $userIds[0],
-            'user2_id' => $userIds[1],
+                'user1_id' => $userIds[0],
+                'user2_id' => $userIds[1],
 
-            'player_id' => $playerId,
-            'class_id' => $classId,
+                'player_id' => $playerId,
+                'class_id' => $classId,
 
-            'title' => null,
-            'image' => null,
+                'title' => null,
+                'image' => null,
 
-            'subject' => trim(
-                (string) ($data['subject'] ?? '')
-            ) ?: null,
+                'subject' => trim(
+                    (string) ($data['subject'] ?? '')
+                ) ?: null,
 
-            'unique_key' => $uniqueKey,
-            'status' => 'active',
-            'created_by' => $currentUserId,
-        ]);
+                'unique_key' => $uniqueKey,
+                'status' => 'active',
+                'created_by' => $currentUserId,
+            ]);
+        } catch (\PDOException $e) {
+            /*
+             * حالت race: درخواست موازی روم را در همین لحظه ساخته است.
+             * به‌جای خطای 500، روم ساخته‌شده بازمی‌گردد.
+             */
+            if ($e->getCode() !== '23000' && strpos($e->getMessage(), '1062') === false) {
+                throw $e;
+            }
+            $roomByKey = ChatRepository::findByUniqueKey($uniqueKey);
+            if (!$roomByKey) {
+                throw $e;
+            }
+            $roomId = (int) $roomByKey['id'];
+        }
 
         ChatRepository::addMember(
             $roomId,
@@ -637,6 +691,12 @@ class ChatService
             );
         }
 
+        /*
+         * اپِ کاربر اکنون پیام‌های اتاق را دریافت می‌کند
+         * → پیام‌های طرف مقابل «تحویل‌شده» می‌شوند (تیک ✓✓ در سمت فرستنده).
+         */
+        ChatRepository::markMessagesDelivered($roomId, $userId);
+
         $limit = (int) ($query['limit'] ?? 50);
 
         if ($limit < 1) {
@@ -891,7 +951,7 @@ class ChatService
                 'age_group_id' => null,
                 'class_id' => $classId,
 
-                'title' => (string) ($class['title'] ?? ''),
+                'title' => 'کلاس: ' . (string) ($class['title'] ?? ''),
 
                 'eligible_user_ids' => ChatRepository::eligibleUserIdsForClass(
                     $classId
@@ -956,9 +1016,29 @@ class ChatService
             $roomId = (int) $existingRoom['id'];
 
             /*
-             * فقط اعضا همگام می‌شوند.
-             * عنوان/پروفایل روم متعلق به ادمین است و با
-             * ویرایش کلاس/گروه سنی بازنویسی نمی‌شود.
+             * همگام‌سازی عنوان روم با نام فعلی کلاس/گروه سنی
+             * (روم‌های قدیمی بدون پیشوند «کلاس: »/«گروه سنی: »
+             * و روم‌هایی که بعداً رنیم شده‌اند هم به‌روز می‌شوند).
+             */
+            $existingTitle = trim(
+                (string) ($existingRoom['title'] ?? '')
+            );
+            if ($existingTitle !== $title) {
+                ChatRepository::updateRoomTitle($roomId, $title);
+            }
+
+            /*
+             * همگام‌سازی ارجاعات class_id/age_group_id —
+             * برای روم‌هایی که قبل از موجود شدن ستون‌ها ساخته شده‌اند.
+             */
+            ChatRepository::syncRoomEntityRefs(
+                $roomId,
+                $spec['class_id'] ?? null,
+                $spec['age_group_id'] ?? null
+            );
+
+            /*
+             * اعضا همگام می‌شوند.
              */
             self::syncGroupRoomMembers(
                 $roomId,
@@ -1360,12 +1440,53 @@ class ChatService
                 ?? ''
             );
 
+            /*
+             * شماره تماس برای دکمه‌ی تماس چت خصوصی.
+             *
+             * اول از ردیف members می‌خوانیم. اگر نسخه‌ی قدیمی
+             * ChatRepository روی هاست هنوز mobile را برنگرداند،
+             * از football_users و سپس از football_players هم
+             * fallback می‌گیریم تا مقدار null بی‌دلیل به کلاینت نرسد.
+             */
+            $mobile = trim((string) ($member['mobile'] ?? ''));
+
+            if (!$isGroup && $mobile === '') {
+                $userRow = UserRepository::findById($userId);
+                $mobile = trim((string) ($userRow['mobile'] ?? ''));
+            }
+
+            if (!$isGroup && $mobile === '' && $role === 'player') {
+                $playerRow = PlayerRepository::findByUserId($userId);
+
+                if (!$playerRow) {
+                    $roomPlayerId = (int) ($room['player_id'] ?? 0);
+                    if ($roomPlayerId > 0) {
+                        $playerRow = PlayerRepository::findById($roomPlayerId);
+                    }
+                }
+
+                $mobile = trim((string) ($playerRow['mobile'] ?? ''));
+            }
+
             $userData = [
                 'id' => $userId,
+
+                /*
+                 * آخرین پیام خوانده‌شده‌ی این عضو — کلاینت با آن
+                 * می‌فهمد که پیام‌های او توسط اعضای دیگر خوانده
+                 * شده‌اند (تیک سبز ✓✓ در سمت فرستنده).
+                 */
+                'last_read_message_id' => (int) (
+                    $member['last_read_message_id'] ?? 0
+                ),
 
                 'full_name' => (string) (
                     $member['full_name'] ?? ''
                 ),
+
+                'mobile' => !$isGroup && $mobile !== ''
+                    ? $mobile
+                    : null,
 
                 /*
                  * آواتار عضو (URL کامل).

@@ -51,6 +51,11 @@ class Validator
                     break;
                 }
 
+                if ($rule === 'array' && !is_array($value)) {
+                    $fieldErrors[] = "فیلد {$field} باید آرایه باشد";
+                    break;
+                }
+
                 if ($rule === 'date' && !self::isValidDate((string) $value)) {
                     $fieldErrors[] = "فیلد {$field} باید تاریخ معتبر با فرمت Y-m-d باشد";
                     break;

@@ -34,7 +34,6 @@ class EnrollmentService
             'q' => $q !== '' ? $q : null,
         ], $page, $perPage);
 
-        // پیوست شیء کلاس (سبک، بدون schedules) به همه آیتم‌ها — همه ثبت‌نام‌های یک کلاس‌اند
         $classLight = $class;
         unset($classLight['schedules']);
 
@@ -53,7 +52,6 @@ class EnrollmentService
 
     /**
      * ثبت‌نام گروهی: همه بازیکنان فعالِ گروه سنیِ خودِ کلاس
-     * (کلاس‌های فوق‌العاده که گروه سنی ندارند، این متد را قبول نمی‌کنند)
      */
     public static function enrollAgeGroup(int $classId): array
     {
@@ -76,6 +74,7 @@ class EnrollmentService
         $created = 0;
         $skippedExisting = 0;
         $skippedCapacity = 0;
+        $invoiced = 0;
 
         foreach ($playerIds as $playerId) {
             if (EnrollmentRepository::findActiveOrPending($classId, $playerId) !== null) {
@@ -102,9 +101,16 @@ class EnrollmentService
             ]);
 
             $created++;
+
+            try {
+                if (self::createInvoiceForEnrollment($class, $playerId, $today, null, null, null, null)) {
+                    $invoiced++;
+                }
+            } catch (\Throwable $e) {
+                error_log('Invoice auto-create failed for player ' . $playerId . ' class ' . $classId . ': ' . $e->getMessage());
+            }
         }
 
-        /* همگام‌سازی روم چت کلاس با بازیکنان جدید */
         if ($created > 0) {
             ChatService::ensureClassRoom($classId, Auth::id());
         }
@@ -115,6 +121,7 @@ class EnrollmentService
             'created' => $created,
             'skipped_existing' => $skippedExisting,
             'skipped_capacity' => $skippedCapacity,
+            'invoiced' => $invoiced,
         ];
     }
 
@@ -142,25 +149,32 @@ class EnrollmentService
 
         if ($status === 'active') self::assertCapacity($class, $classId);
 
+        $monthlyOverride = self::normalizeOptionalFee($data['monthly_fee_override'] ?? null);
+        $seasonalOverride = self::normalizeOptionalFee($data['seasonal_fee_override'] ?? null);
+        $sessionOverride = self::normalizeOptionalFee($data['session_fee_override'] ?? null);
+        $registrationOverride = self::normalizeOptionalFee($data['registration_fee_override'] ?? null);
+
         $enrollmentId = EnrollmentRepository::create([
             'class_id' => $classId,
             'player_id' => $playerId,
             'status' => $status,
             'enrolled_at' => $enrolledAt,
             'ended_at' => $endedAt,
-            'monthly_fee_override' => self::normalizeOptionalFee($data['monthly_fee_override'] ?? null),
-            'session_fee_override' => self::normalizeOptionalFee($data['session_fee_override'] ?? null),
-            'registration_fee_override' => self::normalizeOptionalFee($data['registration_fee_override'] ?? null),
+            'monthly_fee_override' => $monthlyOverride,
+            'seasonal_fee_override' => $seasonalOverride,
+            'session_fee_override' => $sessionOverride,
+            'registration_fee_override' => $registrationOverride,
             'notes' => trim((string) ($data['notes'] ?? '')) ?: null,
             'created_by' => Auth::id(),
         ]);
 
-        /*
-         * اگر بازیکن دارای حساب کاربری باشد،
-         * به روم چت کلاس (و روم گروه سنی) اضافه می‌شود.
-         */
         if ($status === 'active') {
             ChatService::ensureClassRoom($classId, Auth::id());
+            try {
+                self::createInvoiceForEnrollment($class, $playerId, $enrolledAt, $monthlyOverride, $seasonalOverride, $sessionOverride, $registrationOverride);
+            } catch (\Throwable $e) {
+                error_log('Invoice auto-create failed for player ' . $playerId . ' class ' . $classId . ': ' . $e->getMessage());
+            }
         }
 
         return self::requireEnrollment($enrollmentId);
@@ -183,7 +197,7 @@ class EnrollmentService
         if (array_key_exists('enrolled_at', $data)) $updateData['enrolled_at'] = self::normalizeRequiredDate($data['enrolled_at']);
         if (array_key_exists('ended_at', $data)) $updateData['ended_at'] = self::normalizeOptionalDate($data['ended_at']);
 
-        foreach (['monthly_fee_override', 'session_fee_override', 'registration_fee_override'] as $f) {
+        foreach (['monthly_fee_override', 'seasonal_fee_override', 'session_fee_override', 'registration_fee_override'] as $f) {
             if (array_key_exists($f, $data)) $updateData[$f] = self::normalizeOptionalFee($data[$f]);
         }
 
@@ -218,6 +232,19 @@ class EnrollmentService
         self::assertCapacity($class, (int) $enrollment['class_id'], $enrollmentId);
 
         EnrollmentRepository::setStatus($enrollmentId, 'active');
+
+        try {
+            $playerId = (int) $enrollment['player_id'];
+            $enrolledAt = $enrollment['enrolled_at'] ?? date('Y-m-d');
+            $monthlyOverride = isset($enrollment['monthly_fee_override']) ? (int) $enrollment['monthly_fee_override'] : null;
+            $seasonalOverride = isset($enrollment['seasonal_fee_override']) ? (int) $enrollment['seasonal_fee_override'] : null;
+            $sessionOverride = isset($enrollment['session_fee_override']) ? (int) $enrollment['session_fee_override'] : null;
+            $registrationOverride = isset($enrollment['registration_fee_override']) ? (int) $enrollment['registration_fee_override'] : null;
+            self::createInvoiceForEnrollment($class, $playerId, $enrolledAt, $monthlyOverride, $seasonalOverride, $sessionOverride, $registrationOverride);
+        } catch (\Throwable $e) {
+            error_log('Invoice auto-create on activate failed: ' . $e->getMessage());
+        }
+
         return self::requireEnrollment($enrollmentId);
     }
 
@@ -226,6 +253,229 @@ class EnrollmentService
         self::requireEnrollment($enrollmentId);
         EnrollmentRepository::setStatus($enrollmentId, 'inactive');
         return self::requireEnrollment($enrollmentId);
+    }
+
+    /**
+     * Backfill: ساخت فاکتور برای تمام ثبت‌نام‌های فعال که فاکتور ندارند
+     * @param bool $fixZero اگر true باشد، فاکتورهای با مبلغ صفر حذف و دوباره ساخته می‌شوند
+     */
+    public static function backfillMissingInvoices(bool $fixZero = false): array
+    {
+        $pdo = \App\Core\Database::connection();
+
+        $deletedZero = 0;
+        if ($fixZero) {
+            // حذف فاکتورهای صفر که قبلاً با باگ ساخته شده‌اند
+            $stmt = $pdo->prepare("
+                DELETE i FROM football_invoices i
+                WHERE i.subtotal = 0 AND i.remaining_total = 0 AND i.paid_total = 0
+                  AND i.status IN ('open','paid','draft')
+            ");
+            $stmt->execute();
+            $deletedZero = $stmt->rowCount();
+
+            // حذف آیتم‌های یتیم (اگر باقی مانده باشند)
+            $pdo->exec("DELETE ii FROM football_invoice_items ii LEFT JOIN football_invoices i ON i.id = ii.invoice_id WHERE i.id IS NULL");
+        }
+
+        // تلاش با ستون جدید seasonal_fee_override، در صورت نبود fallback
+        try {
+            $stmt = $pdo->prepare("
+                SELECT e.id, e.class_id, e.player_id, e.enrolled_at, e.monthly_fee_override, e.seasonal_fee_override, e.registration_fee_override, e.session_fee_override
+                FROM football_enrollments e
+                INNER JOIN football_classes c ON c.id = e.class_id AND c.deleted_at IS NULL
+                INNER JOIN football_players p ON p.id = e.player_id AND p.deleted_at IS NULL
+                WHERE e.status = 'active' AND e.ended_at IS NULL
+                ORDER BY e.id ASC
+            ");
+            $stmt->execute();
+            $enrollments = $stmt->fetchAll();
+        } catch (\Throwable $e) {
+            $stmt = $pdo->prepare("
+                SELECT e.id, e.class_id, e.player_id, e.enrolled_at, e.monthly_fee_override, e.registration_fee_override, e.session_fee_override
+                FROM football_enrollments e
+                INNER JOIN football_classes c ON c.id = e.class_id AND c.deleted_at IS NULL
+                INNER JOIN football_players p ON p.id = e.player_id AND p.deleted_at IS NULL
+                WHERE e.status = 'active' AND e.ended_at IS NULL
+                ORDER BY e.id ASC
+            ");
+            $stmt->execute();
+            $enrollments = $stmt->fetchAll();
+            foreach ($enrollments as &$en) $en['seasonal_fee_override'] = null;
+            unset($en);
+        }
+
+        $created = 0;
+        $skipped = 0;
+        $failed = 0;
+        $details = [];
+
+        foreach ($enrollments as $en) {
+            $classId = (int) $en['class_id'];
+            $playerId = (int) $en['player_id'];
+
+            $class = ClassRepository::findById($classId);
+            if (!$class) {
+                $skipped++;
+                continue;
+            }
+
+            try {
+                $enrolledAt = $en['enrolled_at'] ?: date('Y-m-d');
+                $monthlyOverride = $en['monthly_fee_override'] !== null ? (int) $en['monthly_fee_override'] : null;
+                $seasonalOverride = $en['seasonal_fee_override'] !== null ? (int) $en['seasonal_fee_override'] : null;
+                $sessionOverride = $en['session_fee_override'] !== null ? (int) $en['session_fee_override'] : null;
+                $registrationOverride = $en['registration_fee_override'] !== null ? (int) $en['registration_fee_override'] : null;
+
+                // دیباگ: اگر کلاس هزینه صفر دارد، لاگ کن
+                $classMonthly = (int) ($class['monthly_fee'] ?? 0);
+                $classSeasonal = (int) ($class['seasonal_fee'] ?? 0);
+                $classReg = (int) ($class['registration_fee'] ?? 0);
+                $classSession = (int) ($class['session_fee'] ?? 0);
+                $billingCycle = $class['billing_cycle'] ?? 'monthly';
+                if ($classMonthly == 0 && $classSeasonal == 0 && $classReg == 0 && $classSession == 0) {
+                    $details[] = "Skip player $playerId class $classId ({$class['title']}) - class fees are ZERO (monthly=$classMonthly seasonal=$classSeasonal reg=$classReg session=$classSession)";
+                    $skipped++;
+                    continue;
+                }
+
+                $result = self::createInvoiceForEnrollment($class, $playerId, $enrolledAt, $monthlyOverride, $seasonalOverride, $sessionOverride, $registrationOverride);
+                if ($result) {
+                    $created++;
+                    $details[] = "Created invoice for player $playerId class $classId ({$class['title']}) cycle=$billingCycle monthly=$classMonthly seasonal=$classSeasonal reg=$classReg";
+                } else {
+                    $skipped++;
+                }
+            } catch (\Throwable $e) {
+                $failed++;
+                $details[] = "Failed player $playerId class $classId: " . $e->getMessage();
+                error_log('Backfill invoice failed: ' . $e->getMessage());
+            }
+        }
+
+        return [
+            'total_enrollments' => count($enrollments),
+            'created' => $created,
+            'skipped_existing_or_no_fee' => $skipped,
+            'failed' => $failed,
+            'deleted_zero' => $deletedZero,
+            'details' => $details,
+        ];
+    }
+
+    /**
+     * ایجاد فاکتور خودکار برای ثبت‌نام بر اساس هزینه‌های کلاس
+     * ساپورت ماهیانه + فصلی (۳ ماهه)
+     */
+    private static function createInvoiceForEnrollment(array $class, int $playerId, string $enrolledAt, ?int $monthlyOverride, ?int $seasonalOverride, ?int $sessionOverride, ?int $registrationOverride): bool
+    {
+        // جلوگیری از فاکتور تکراری برای همین کلاس و بازیکن
+        try {
+            $pdo = \App\Core\Database::connection();
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*) AS cnt
+                FROM football_invoice_items ii
+                INNER JOIN football_invoices i ON i.id = ii.invoice_id AND i.status != 'cancelled'
+                WHERE i.player_id = :player_id AND ii.class_id = :class_id
+            ");
+            $stmt->execute(['player_id' => $playerId, 'class_id' => (int) $class['id']]);
+            if ((int) $stmt->fetch()['cnt'] > 0) {
+                return false;
+            }
+        } catch (\Throwable $e) {
+            // اگر چک شکست خورد، ادامه بده
+        }
+
+        $billingCycle = $class['billing_cycle'] ?? 'monthly';
+        if ($billingCycle === 'quarterly') $billingCycle = 'seasonal';
+
+        // override صفر یا منفی یعنی استفاده از شهریه کلاس (نه رایگان)
+        $monthlyFee = ($monthlyOverride !== null && $monthlyOverride > 0) ? $monthlyOverride : ($class['monthly_fee'] !== null ? (int) $class['monthly_fee'] : 0);
+        $seasonalFee = ($seasonalOverride !== null && $seasonalOverride > 0) ? $seasonalOverride : ($class['seasonal_fee'] !== null ? (int) $class['seasonal_fee'] : 0);
+        $registrationFee = ($registrationOverride !== null && $registrationOverride > 0) ? $registrationOverride : ($class['registration_fee'] !== null ? (int) $class['registration_fee'] : 0);
+        $sessionFee = ($sessionOverride !== null && $sessionOverride > 0) ? $sessionOverride : ($class['session_fee'] !== null ? (int) $class['session_fee'] : 0);
+
+        // اگر فصلی است ولی seasonal_fee صفر است، از monthly*3 استفاده کن
+        if ($billingCycle === 'seasonal' && $seasonalFee <= 0 && $monthlyFee > 0) {
+            $seasonalFee = $monthlyFee * 3;
+        }
+
+        // تعیین مبلغ اصلی بر اساس دوره
+        $mainFee = 0;
+        $mainTitle = '';
+        $mainType = 'monthly';
+        if ($billingCycle === 'seasonal') {
+            $mainFee = $seasonalFee;
+            $mainTitle = 'شهریه فصلی (۳ ماهه) کلاس ';
+            $mainType = 'seasonal';
+        } else {
+            $mainFee = $monthlyFee;
+            $mainTitle = 'شهریه ماهانه کلاس ';
+            $mainType = 'monthly';
+        }
+
+        if ($mainFee <= 0 && $registrationFee <= 0 && $sessionFee <= 0) {
+            // اگر فصلی بود و مبلغ اصلی صفر بود ولی ماهیانه دارد، fallback به ماهیانه
+            if ($billingCycle === 'seasonal' && $monthlyFee > 0) {
+                $mainFee = $monthlyFee;
+                $mainTitle = 'شهریه ماهانه کلاس ';
+                $mainType = 'monthly';
+            } else {
+                return false;
+            }
+        }
+
+        $items = [];
+        $classId = (int) $class['id'];
+        $classTitle = $class['title'] ?? 'کلاس';
+
+        if ($registrationFee > 0) {
+            $items[] = [
+                'title' => 'حق ثبت‌نام کلاس ' . $classTitle,
+                'item_type' => 'registration',
+                'amount' => $registrationFee,
+                'quantity' => 1,
+                'class_id' => $classId,
+                'description' => 'ثبت‌نام در کلاس ' . $classTitle,
+            ];
+        }
+
+        if ($mainFee > 0) {
+            $items[] = [
+                'title' => $mainTitle . $classTitle,
+                'item_type' => $mainType,
+                'amount' => $mainFee,
+                'quantity' => 1,
+                'class_id' => $classId,
+                'description' => $mainTitle . ' - ' . $classTitle . ($billingCycle === 'seasonal' ? ' (۳ ماهه)' : ''),
+            ];
+        } elseif ($sessionFee > 0) {
+            $items[] = [
+                'title' => 'شهریه جلسه‌ای کلاس ' . $classTitle,
+                'item_type' => 'session',
+                'amount' => $sessionFee,
+                'quantity' => 1,
+                'class_id' => $classId,
+                'description' => 'شهریه جلسه‌ای - ' . $classTitle,
+            ];
+        }
+
+        if (empty($items)) return false;
+
+        $dueDate = date('Y-m-d', strtotime($enrolledAt . ' +7 days'));
+        $invoiceType = $registrationFee > 0 ? 'registration' : $mainType;
+        $billingMonths = $billingCycle === 'seasonal' ? 3 : 1;
+
+        InvoiceService::create([
+            'player_id' => $playerId,
+            'invoice_type' => $invoiceType,
+            'period_start_date' => $enrolledAt,
+            'due_date' => $dueDate,
+            'notes' => 'فاکتور خودکار ثبت‌نام در کلاس ' . $classTitle . ' - دوره: ' . ($billingCycle === 'seasonal' ? "فصلی ({$billingMonths} ماهه)" : 'ماهیانه'),
+            'items' => $items,
+        ]);
+
+        return true;
     }
 
     private static function requireClass(int $classId): array

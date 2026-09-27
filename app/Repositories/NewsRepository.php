@@ -131,6 +131,75 @@ class NewsRepository
 
         $stmt = $pdo->prepare('UPDATE football_news SET deleted_at = NOW(), updated_at = NOW() WHERE id = :id AND deleted_at IS NULL');
         $stmt->execute(['id' => $id]);
+
+        // جدا کردن رسانه‌ها تا فایل‌های خبر حذف‌شده در لیست عمومی نمانند
+        $pdo->prepare('
+            UPDATE football_media
+            SET related_type = NULL, related_id = NULL, updated_at = NOW()
+            WHERE related_type = "news" AND related_id = :news_id
+        ')->execute(['news_id' => $id]);
+    }
+
+    /**
+     * یک خبر واحد برای کاربر کلاینت با بررسی دسترسی مخاطب
+     */
+    public static function findPublishedForUser(int $newsId, int $userId, string $role): ?array
+    {
+        $pdo = Database::connection();
+
+        if ($role === 'admin') {
+            $stmt = $pdo->prepare('
+                SELECT n.*, u.full_name AS created_by_name
+                FROM football_news n
+                LEFT JOIN football_users u ON u.id = n.created_by
+                WHERE n.id = :id AND n.status = "published" AND n.deleted_at IS NULL
+                LIMIT 1
+            ');
+            $stmt->execute(['id' => $newsId]);
+            $row = $stmt->fetch();
+            return $row ?: null;
+        }
+
+        $context = \App\Repositories\ClientRepository::getUserContext($userId, $role);
+
+        $params = ['id' => $newsId, 'role' => $role];
+
+        // ساخت IN clause ها
+        $makeIn = function(array $ids, string $prefix) use (&$params): string {
+            if (empty($ids)) return '0';
+            $parts = [];
+            foreach ($ids as $i => $id) {
+                $k = $prefix . $i;
+                $parts[] = ':' . $k;
+                $params[$k] = (int)$id;
+            }
+            return implode(', ', $parts);
+        };
+
+        $classIn = $makeIn($context['class_ids'], 'cid');
+        $ageGroupIn = $makeIn($context['age_group_ids'], 'aid');
+        $playerIn = $makeIn($context['player_ids'], 'pid');
+
+        $stmt = $pdo->prepare("
+            SELECT DISTINCT n.*, u.full_name AS created_by_name
+            FROM football_news n
+            LEFT JOIN football_users u ON u.id = n.created_by
+            LEFT JOIN football_news_audiences a ON a.news_id = n.id
+            WHERE n.id = :id AND n.status = \"published\" AND n.deleted_at IS NULL
+              AND (
+                    a.id IS NULL
+                 OR a.audience_type = \"global\"
+                 OR (a.audience_type = \"role\" AND a.role = :role)
+                 OR (a.audience_type = \"class\" AND a.target_id IN ({$classIn}))
+                 OR (a.audience_type = \"age_group\" AND a.target_id IN ({$ageGroupIn}))
+                 OR (a.audience_type = \"player\" AND a.target_id IN ({$playerIn}))
+              )
+            LIMIT 1
+        ");
+
+        $stmt->execute($params);
+        $row = $stmt->fetch();
+        return $row ?: null;
     }
 
     public static function audiences(int $newsId): array
@@ -141,6 +210,104 @@ class NewsRepository
         $stmt->execute(['news_id' => $newsId]);
 
         return $stmt->fetchAll();
+    }
+
+    /**
+     * مخاطبان چند خبر به‌صورت گروهی — برای جلوگیری از N+1 در لیست‌ها
+     * @param int[] $newsIds
+     * @return array<int, array> کلید = news_id
+     */
+    public static function audiencesForNewsIds(array $newsIds): array
+    {
+        $newsIds = array_values(array_unique(array_filter(
+            array_map('intval', $newsIds),
+            static fn (int $id): bool => $id > 0
+        )));
+
+        if (empty($newsIds)) {
+            return [];
+        }
+
+        $pdo = Database::connection();
+
+        $params = [];
+        $placeholders = [];
+
+        foreach ($newsIds as $index => $newsId) {
+            $key = 'nid' . $index;
+            $placeholders[] = ':' . $key;
+            $params[$key] = $newsId;
+        }
+
+        $inClause = implode(', ', $placeholders);
+
+        $stmt = $pdo->prepare("\n            SELECT * FROM football_news_audiences\n            WHERE news_id IN ({$inClause})\n            ORDER BY id ASC\n        ");
+
+        $stmt->execute($params);
+
+        $grouped = [];
+
+        foreach ($stmt->fetchAll() as $row) {
+            $grouped[(int) $row['news_id']][] = $row;
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * دریافت عنوان گروه‌های سنی برای enrich کردن مخاطبان
+     * @param int[] $ids
+     * @return array<int, string> id => title
+     */
+    public static function getAgeGroupTitles(array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids), fn($id) => $id > 0)));
+        if (empty($ids)) return [];
+
+        $pdo = Database::connection();
+        $params = [];
+        $placeholders = [];
+        foreach ($ids as $i => $id) {
+            $k = 'ag' . $i;
+            $placeholders[] = ':' . $k;
+            $params[$k] = $id;
+        }
+        $in = implode(', ', $placeholders);
+        $stmt = $pdo->prepare("SELECT id, title FROM football_age_groups WHERE id IN ({$in})");
+        $stmt->execute($params);
+        $map = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $map[(int)$row['id']] = (string)$row['title'];
+        }
+        return $map;
+    }
+
+    /**
+     * دریافت عنوان کلاس‌ها
+     * @param int[] $ids
+     * @return array<int, string>
+     */
+    public static function getClassTitles(array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids), fn($id) => $id > 0)));
+        if (empty($ids)) return [];
+
+        $pdo = Database::connection();
+        $params = [];
+        $placeholders = [];
+        foreach ($ids as $i => $id) {
+            $k = 'cl' . $i;
+            $placeholders[] = ':' . $k;
+            $params[$k] = $id;
+        }
+        $in = implode(', ', $placeholders);
+        $stmt = $pdo->prepare("SELECT id, title FROM football_classes WHERE id IN ({$in})");
+        $stmt->execute($params);
+        $map = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $map[(int)$row['id']] = (string)$row['title'];
+        }
+        return $map;
     }
 
     public static function replaceAudiences(int $newsId, array $audiences): void

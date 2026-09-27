@@ -35,6 +35,8 @@ class NewsService
 
         // چسباندن رسانه‌ها (عکس/فیلم) به هر خبر — بدون N+1
         self::attachMediaToItems($result['items']);
+        // چسباندن مخاطبان به هر خبر — بدون N+1 و با عنوان
+        self::attachAudiencesToItems($result['items']);
 
         return $result;
     }
@@ -42,10 +44,78 @@ class NewsService
     public static function getDetailed(int $id): array
     {
         $news = self::requireNews($id);
-        $news['audiences'] = NewsRepository::audiences($id);
+        $audiences = NewsRepository::audiences($id);
+        $news['audiences'] = self::enrichAudiences($audiences);
         $news['media'] = MediaService::presentMany(NewsRepository::mediaForNews($id));
 
         return $news;
+    }
+
+    /**
+     * غنی‌سازی مخاطبان با عنوان گروه سنی و کلاس
+     */
+    private static function enrichAudiences(array $audiences): array
+    {
+        if (empty($audiences)) return $audiences;
+
+        $ageGroupIds = [];
+        $classIds = [];
+        foreach ($audiences as $a) {
+            if (($a['audience_type'] ?? '') === 'age_group' && !empty($a['target_id'])) {
+                $ageGroupIds[] = (int)$a['target_id'];
+            }
+            if (($a['audience_type'] ?? '') === 'class' && !empty($a['target_id'])) {
+                $classIds[] = (int)$a['target_id'];
+            }
+        }
+
+        $ageGroupTitles = NewsRepository::getAgeGroupTitles($ageGroupIds);
+        $classTitles = NewsRepository::getClassTitles($classIds);
+
+        foreach ($audiences as &$a) {
+            $type = $a['audience_type'] ?? '';
+            $tid = (int)($a['target_id'] ?? 0);
+            if ($type === 'age_group') {
+                $a['target_title'] = $ageGroupTitles[$tid] ?? null;
+            } elseif ($type === 'class') {
+                $a['target_title'] = $classTitles[$tid] ?? null;
+            } else {
+                $a['target_title'] = null;
+            }
+        }
+        unset($a);
+
+        return $audiences;
+    }
+
+    private static function attachAudiencesToItems(array &$items): void
+    {
+        if (empty($items)) return;
+
+        $newsIds = [];
+        foreach ($items as $item) {
+            if (isset($item['id'])) $newsIds[] = (int)$item['id'];
+        }
+
+        $grouped = NewsRepository::audiencesForNewsIds($newsIds);
+
+        // جمع‌آوری همه target_id ها برای enrich یکجا
+        $allAudiencesFlat = [];
+        foreach ($grouped as $list) {
+            foreach ($list as $a) $allAudiencesFlat[] = $a;
+        }
+        $enrichedFlat = self::enrichAudiences($allAudiencesFlat);
+
+        // دوباره گروه‌بندی بر اساس news_id
+        $enrichedGrouped = [];
+        foreach ($enrichedFlat as $a) {
+            $enrichedGrouped[(int)$a['news_id']][] = $a;
+        }
+
+        foreach ($items as &$item) {
+            $item['audiences'] = $enrichedGrouped[(int)$item['id']] ?? [];
+        }
+        unset($item);
     }
 
     /* ═══════════════════════════════════════════════════════════

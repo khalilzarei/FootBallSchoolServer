@@ -63,7 +63,27 @@ class UserService
         $nationalCode = trim((string) ($data['national_code'] ?? '')) ?: null;
 
         self::validateIdentifiers($mobile, $nationalCode);
-        self::assertUniqueIdentifiers($mobile, $nationalCode);
+
+        if ($role === 'coach') {
+            /*
+             * مربی: یک نفر می‌تواند هم ادمین باشد و هم مربی؛
+             * اگر کاربری با همین کد ملی/موبایل (مثلاً ادمین) قبلاً ثبت شده،
+             * به‌جای خطای تکراری، همان کاربر به لیست مربی‌ها متصل می‌شود.
+             */
+            $existing = self::findUserByIdentifiers($mobile, $nationalCode);
+            if ($existing !== null) {
+                $pdo = \App\Core\Database::connection();
+                $stmt = $pdo->prepare('SELECT id FROM football_coaches WHERE user_id = :user_id LIMIT 1');
+                $stmt->execute(['user_id' => (int) $existing['id']]);
+                if (!$stmt->fetch()) {
+                    $pdo->prepare('INSERT INTO football_coaches (user_id) VALUES (:user_id)')
+                        ->execute(['user_id' => (int) $existing['id']]);
+                }
+                return self::sanitize($existing);
+            }
+        } else {
+            self::assertUniqueIdentifiers($mobile, $nationalCode);
+        }
 
         $password = trim((string) ($data['password'] ?? ''));
         $generatedInitial = false;
@@ -203,9 +223,29 @@ class UserService
         if ($avatarFile === null || ($avatarFile['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
             throw new AppException('فایل عکس الزامی است', 422);
         }
-        $newPath = AvatarService::upload($avatarFile, 'users');
+        // آپلود برای users
+        $newPathUser = AvatarService::upload($avatarFile, 'users');
         if (!empty($user['avatar_path'])) AvatarService::delete($user['avatar_path']);
-        UserRepository::updateAvatar($userId, $newPath);
+        UserRepository::updateAvatar($userId, $newPathUser);
+
+        // اگر کاربر بازیکن است، آواتار بازیکن هم به‌روز شود (برای نمایش در داشبورد و پروفایل کلاینت)
+        try {
+            $player = \App\Repositories\ClientRepository::playerForUser($userId);
+            if ($player) {
+                if (!empty($player['avatar_path'])) {
+                    // فقط اگر مسیر متفاوت است، قدیمی را حذف کن
+                    if ($player['avatar_path'] !== $newPathUser) {
+                        AvatarService::delete($player['avatar_path']);
+                    }
+                }
+                // برای سادگی همان مسیر users را برای player هم ذخیره می‌کنیم (URL هر دو کار می‌کند)
+                // اگر خواستی جدا باشد، می‌توان فایل را کپی کرد
+                \App\Repositories\PlayerRepository::updateAvatar((int) $player['id'], $newPathUser);
+            }
+        } catch (\Throwable $e) {
+            // خطای به‌روزرسانی آواتار بازیکن نباید مانع به‌روزرسانی آواتار کاربر شود
+        }
+
         return self::sanitize(UserRepository::findById($userId));
     }
 
@@ -214,6 +254,17 @@ class UserService
         $user = self::requireUser($userId);
         if (!empty($user['avatar_path'])) AvatarService::delete($user['avatar_path']);
         UserRepository::updateAvatar($userId, null);
+
+        try {
+            $player = \App\Repositories\ClientRepository::playerForUser($userId);
+            if ($player && !empty($player['avatar_path'])) {
+                AvatarService::delete($player['avatar_path']);
+                \App\Repositories\PlayerRepository::updateAvatar((int) $player['id'], null);
+            }
+        } catch (\Throwable $e) {
+            // ignore
+        }
+
         return self::sanitize(UserRepository::findById($userId));
     }
 
@@ -256,6 +307,34 @@ class UserService
     {
         if ($mobile !== null && UserRepository::existsByMobile($mobile, $exceptUserId)) throw new AppException('این شماره موبایل قبلاً ثبت شده است', 422);
         if ($nationalCode !== null && UserRepository::existsByNationalCode($nationalCode, $exceptUserId)) throw new AppException('این کد ملی قبلاً ثبت شده است', 422);
+    }
+
+    /**
+     * پیدا کردن کاربر موجود با کد ملی یا موبایل (برای اتصال مربی به کاربر قدیمی)
+     */
+    private static function findUserByIdentifiers(?string $mobile, ?string $nationalCode): ?array
+    {
+        $conditions = [];
+        $params = [];
+
+        if ($nationalCode !== null) {
+            $conditions[] = 'national_code = :nc';
+            $params['nc'] = $nationalCode;
+        }
+        if ($mobile !== null) {
+            $conditions[] = 'mobile = :mobile';
+            $params['mobile'] = $mobile;
+        }
+        if (empty($conditions)) return null;
+
+        $pdo = \App\Core\Database::connection();
+        $stmt = $pdo->prepare(
+            'SELECT * FROM football_users WHERE deleted_at IS NULL AND ('
+            . implode(' OR ', $conditions) . ') LIMIT 1'
+        );
+        $stmt->execute($params);
+
+        return $stmt->fetch() ?: null;
     }
 
     private static function generatePassword(int $length = 12): string

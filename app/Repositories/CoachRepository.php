@@ -13,8 +13,13 @@ class CoachRepository
     {
         $pdo = Database::connection();
 
-        $where = ['u.deleted_at IS NULL', 'u.role = :role'];
-        $params = ['role' => 'coach'];
+        /*
+         * لیست مربی‌ها = کاربرهایی که رکورد در football_coaches دارند.
+         * فیلتر role='coach' نمی‌شود — چون یک ادمین هم می‌تواند مربی باشد
+         * (نقش کاربر admin است ولی در لیست مربی‌ها دیده می‌شود).
+         */
+        $where = ['u.deleted_at IS NULL'];
+        $params = [];
 
         if (!empty($filters['status'])) {
             $where[] = 'u.status = :status';

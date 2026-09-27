@@ -34,6 +34,7 @@ class PaymentController
             'payment_method' => 'required|string|in:cash,card_transfer,pos,cheque,online,other',
             'status' => 'string|in:pending,approved',
             'receipt_media_id' => 'integer',
+            'paid_at' => 'date',
             'notes' => 'string|max:1000',
         ]);
 

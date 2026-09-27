@@ -75,22 +75,39 @@ class PlayerRepository
         return (bool) $stmt->fetch();
     }
 
+    public static function existsByMobile(string $mobile, ?int $exceptPlayerId = null): bool
+    {
+        $pdo = Database::connection();
+        $sql = 'SELECT id FROM football_players WHERE mobile = :mobile AND deleted_at IS NULL';
+        $params = ['mobile' => $mobile];
+        if ($exceptPlayerId !== null) {
+            $sql .= ' AND id <> :except_id';
+            $params['except_id'] = $exceptPlayerId;
+        }
+        $stmt = $pdo->prepare($sql . ' LIMIT 1');
+        $stmt->execute($params);
+        return (bool) $stmt->fetch();
+    }
+
     public static function create(array $data): int
     {
         $pdo = Database::connection();
         $stmt = $pdo->prepare('
             INSERT INTO football_players (
-                first_name, last_name, national_code, birth_date, gender,
-                avatar_path, medical_notes, status, notes, created_by, created_at
+                first_name, last_name, national_code, mobile, birth_date, gender,
+                avatar_path, medical_notes, status, notes, created_by,
+                password_hash, created_at
             ) VALUES (
-                :first_name, :last_name, :national_code, :birth_date, :gender,
-                :avatar_path, :medical_notes, :status, :notes, :created_by, NOW()
+                :first_name, :last_name, :national_code, :mobile, :birth_date, :gender,
+                :avatar_path, :medical_notes, :status, :notes, :created_by,
+                :password_hash, NOW()
             )
         ');
         $stmt->execute([
             'first_name' => $data['first_name'],
             'last_name' => $data['last_name'],
             'national_code' => $data['national_code'] ?? null,
+            'mobile' => $data['mobile'] ?? null,
             'birth_date' => $data['birth_date'],
             'gender' => $data['gender'] ?? null,
             // رشته خالی به‌جای null — برخی دیتابیس‌ها (هاست) این ستون را NOT NULL تعریف کرده‌اند
@@ -99,6 +116,9 @@ class PlayerRepository
             'status' => $data['status'] ?? 'active',
             'notes' => $data['notes'] ?? null,
             'created_by' => $data['created_by'] ?? null,
+            // رمز پیش‌فرض بازیکن = خودِ کد ملی (هش bcrypt) — مطابق تصمیم:
+            // ورود بازیکن با کد ملی + کد ملی
+            'password_hash' => password_hash((string) ($data['national_code'] ?? ''), PASSWORD_DEFAULT),
         ]);
         return (int) $pdo->lastInsertId();
     }
@@ -111,7 +131,7 @@ class PlayerRepository
         
         // اضافه شدن avatar_path به لیست فیلدهای مجاز
         $allowedFields = [
-            'first_name', 'last_name', 'national_code', 'birth_date', 
+            'first_name', 'last_name', 'national_code', 'mobile', 'birth_date',
             'avatar_path', 'gender', 'medical_notes', 'status', 'notes', 'user_id', 'password_hash'
         ];
 

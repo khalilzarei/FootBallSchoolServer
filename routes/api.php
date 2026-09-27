@@ -231,6 +231,8 @@ $router->post('/api/v1/schedules/{id}/deactivate', [ClassScheduleController::cla
 |--------------------------------------------------------------------------
 */
 
+$router->post('/api/v1/enrollments/backfill-invoices', [EnrollmentController::class, 'backfillInvoices'], ['auth', 'admin']);
+
 $router->get('/api/v1/classes/{id}/players', [EnrollmentController::class, 'index'], ['auth', 'admin']);
 
 $router->post('/api/v1/classes/{id}/players', [EnrollmentController::class, 'store'], ['auth', 'admin']);
@@ -367,6 +369,10 @@ $router->get('/api/v1/media/{id}', [MediaController::class, 'show'], ['auth']);
 
 $router->get('/api/v1/media/{id}/download', [MediaController::class, 'download'], ['auth']);
 
+$router->get('/api/v1/media/{id}/stream', [MediaController::class, 'stream'], ['auth']);
+
+$router->get('/api/v1/media/{id}/thumbnail', [MediaController::class, 'thumbnail'], ['auth']);
+
 $router->post('/api/v1/media/{id}/audiences', [MediaController::class, 'setAudiences'], ['auth', 'admin']);
 
 $router->delete('/api/v1/media/{id}', [MediaController::class, 'delete'], ['auth', 'admin']);
@@ -493,6 +499,8 @@ $router->get('/api/v1/me/schedule', [ClientController::class, 'schedule'], ['aut
 
 $router->get('/api/v1/me/news', [ClientController::class, 'news'], ['auth']);
 
+$router->get('/api/v1/me/news/{id}', [ClientController::class, 'newsDetail'], ['auth']);
+
 $router->get('/api/v1/me/media', [ClientController::class, 'media'], ['auth']);
 
 $router->get('/api/v1/me/finance', [ClientController::class, 'finance'], ['auth']);
@@ -502,3 +510,15 @@ $router->get('/api/v1/me/classes', [ClientController::class, 'classes'], ['auth'
 $router->get('/api/v1/me/matches', [ClientController::class, 'matches'], ['auth']);
 
 $router->get('/api/v1/me/chat-contacts', [ClientController::class, 'chatContacts'], ['auth']);
+
+$router->get('/api/v1/me/profile', [ClientController::class, 'profile'], ['auth']);
+
+$router->put('/api/v1/me/profile', [ClientController::class, 'updateProfile'], ['auth']);
+
+$router->put('/api/v1/me/children/{id}', [ClientController::class, 'updateChild'], ['auth']);
+
+$router->get('/api/v1/me/guardians', [ClientController::class, 'guardians'], ['auth']);
+
+$router->put('/api/v1/me/guardians/{id}', [ClientController::class, 'updateGuardian'], ['auth']);
+
+$router->get('/api/v1/me/evaluations', [ClientController::class, 'evaluations'], ['auth']);

@@ -59,7 +59,10 @@ class AgeGroupService
         self::validateBirthRange($from, $to);
 
         if (AgeGroupRepository::hasOverlap($from, $to)) {
-            throw new AppException('بازه تاریخی با گروه سنی فعال دیگر تداخل دارد', 422);
+            $overlaps = AgeGroupRepository::getOverlapping($from, $to);
+            $details = array_map(fn($g) => "«{$g['title']}» ({$g['birth_date_from']} تا {$g['birth_date_to']})", $overlaps);
+            $msg = 'بازه تاریخی با گروه سنی فعال دیگر تداخل دارد: ' . implode('، ', $details) . '. هر گروه سنی باید بازه تولد یکتا داشته باشد و با گروه‌های فعال دیگر همپوشانی نکند.';
+            throw new AppException($msg, 422);
         }
 
         $status = (string) ($data['status'] ?? 'active');
@@ -128,7 +131,10 @@ class AgeGroupService
         self::validateBirthRange($ff, $ft);
 
         if (AgeGroupRepository::hasOverlap($ff, $ft, $id)) {
-            throw new AppException('بازه تاریخی تداخل دارد', 422);
+            $overlaps = AgeGroupRepository::getOverlapping($ff, $ft, $id);
+            $details = array_map(fn($g) => "«{$g['title']}» ({$g['birth_date_from']} تا {$g['birth_date_to']})", $overlaps);
+            $msg = 'بازه تاریخی با گروه فعال دیگر تداخل دارد: ' . implode('، ', $details);
+            throw new AppException($msg, 422);
         }
 
         if (!empty($updateData)) AgeGroupRepository::update($id, $updateData);

@@ -36,6 +36,7 @@ class EnrollmentController
             'enrolled_at' => 'date',
             'ended_at' => 'date',
             'monthly_fee_override' => 'integer',
+            'seasonal_fee_override' => 'integer',
             'session_fee_override' => 'integer',
             'registration_fee_override' => 'integer',
             'notes' => 'string|max:1000',
@@ -92,6 +93,7 @@ class EnrollmentController
             'enrolled_at' => 'date',
             'ended_at' => 'date',
             'monthly_fee_override' => 'integer',
+            'seasonal_fee_override' => 'integer',
             'session_fee_override' => 'integer',
             'registration_fee_override' => 'integer',
             'notes' => 'string|max:1000',
@@ -129,6 +131,20 @@ class EnrollmentController
             Response::success('ثبت‌نام غیرفعال شد', ['enrollment' => $enrollment]);
         } catch (AppException $e) {
             Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
+
+    public function backfillInvoices(Request $request, array $params = []): void
+    {
+        try {
+            $fixZero = !empty($request->input()['fix_zero']) || !empty($_GET['fix_zero']);
+            $result = EnrollmentService::backfillMissingInvoices($fixZero);
+            Response::success('بک‌فیل فاکتورها انجام شد', $result);
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        } catch (\Throwable $e) {
+            error_log('backfillInvoices error: ' . $e->getMessage());
+            Response::error('خطای داخلی: ' . $e->getMessage(), 500);
         }
     }
 }

@@ -85,10 +85,6 @@ class EnrollmentRepository
         return $enrollment ? self::hydrate($enrollment) : null;
     }
 
-    /**
-     * تبدیل ردیف خام به ساختاری که EnrollmentDto اپ اندروید انتظار دارد:
-     * is_active + شیء تو در توی player (نام کامل، سن و ...)
-     */
     private static function hydrate(array $row): array
     {
         $row['id'] = (int) $row['id'];
@@ -110,7 +106,6 @@ class EnrollmentRepository
             'avatar_url' => AvatarService::getAvatarUrl($row['avatar_path'] ?? null, 'player'),
         ];
 
-        // کلاس سبک — فقط در findById که به جدول کلاس JOIN شده است
         if (array_key_exists('class_title', $row)) {
             $row['class'] = [
                 'id' => (int) $row['class_id'],
@@ -173,11 +168,6 @@ class EnrollmentRepository
         return (bool) $stmt->fetch();
     }
 
-    /**
-     * شناسه بازیکنان فعالِ یک گروه سنی
-     * عضویت بر اساس بازه تاریخ تولد است: هر بازیکنی که تاریخ تولدش
-     * بین birth_date_from و birth_date_to گروه باشد، عضو این گروه است
-     */
     public static function activePlayerIdsByAgeGroup(int $ageGroupId): array
     {
         $pdo = Database::connection();
@@ -203,30 +193,59 @@ class EnrollmentRepository
     {
         $pdo = Database::connection();
 
-        $stmt = $pdo->prepare('
-            INSERT INTO football_enrollments (
-                class_id, player_id, status, enrolled_at, ended_at,
-                monthly_fee_override, session_fee_override, registration_fee_override,
-                notes, created_by, created_at
-            ) VALUES (
-                :class_id, :player_id, :status, :enrolled_at, :ended_at,
-                :monthly_fee_override, :session_fee_override, :registration_fee_override,
-                :notes, :created_by, NOW()
-            )
-        ');
+        // سعی با ستون جدید، اگر وجود نداشت fallback به قدیمی
+        try {
+            $stmt = $pdo->prepare('
+                INSERT INTO football_enrollments (
+                    class_id, player_id, status, enrolled_at, ended_at,
+                    monthly_fee_override, seasonal_fee_override, session_fee_override, registration_fee_override,
+                    notes, created_by, created_at
+                ) VALUES (
+                    :class_id, :player_id, :status, :enrolled_at, :ended_at,
+                    :monthly_fee_override, :seasonal_fee_override, :session_fee_override, :registration_fee_override,
+                    :notes, :created_by, NOW()
+                )
+            ');
 
-        $stmt->execute([
-            'class_id' => $data['class_id'],
-            'player_id' => $data['player_id'],
-            'status' => $data['status'] ?? 'active',
-            'enrolled_at' => $data['enrolled_at'],
-            'ended_at' => $data['ended_at'] ?? null,
-            'monthly_fee_override' => $data['monthly_fee_override'] ?? null,
-            'session_fee_override' => $data['session_fee_override'] ?? null,
-            'registration_fee_override' => $data['registration_fee_override'] ?? null,
-            'notes' => $data['notes'] ?? null,
-            'created_by' => $data['created_by'] ?? null,
-        ]);
+            $stmt->execute([
+                'class_id' => $data['class_id'],
+                'player_id' => $data['player_id'],
+                'status' => $data['status'] ?? 'active',
+                'enrolled_at' => $data['enrolled_at'],
+                'ended_at' => $data['ended_at'] ?? null,
+                'monthly_fee_override' => $data['monthly_fee_override'] ?? null,
+                'seasonal_fee_override' => $data['seasonal_fee_override'] ?? null,
+                'session_fee_override' => $data['session_fee_override'] ?? null,
+                'registration_fee_override' => $data['registration_fee_override'] ?? null,
+                'notes' => $data['notes'] ?? null,
+                'created_by' => $data['created_by'] ?? null,
+            ]);
+        } catch (\Throwable $e) {
+            // fallback برای DB قدیمی بدون seasonal_fee_override
+            $stmt = $pdo->prepare('
+                INSERT INTO football_enrollments (
+                    class_id, player_id, status, enrolled_at, ended_at,
+                    monthly_fee_override, session_fee_override, registration_fee_override,
+                    notes, created_by, created_at
+                ) VALUES (
+                    :class_id, :player_id, :status, :enrolled_at, :ended_at,
+                    :monthly_fee_override, :session_fee_override, :registration_fee_override,
+                    :notes, :created_by, NOW()
+                )
+            ');
+            $stmt->execute([
+                'class_id' => $data['class_id'],
+                'player_id' => $data['player_id'],
+                'status' => $data['status'] ?? 'active',
+                'enrolled_at' => $data['enrolled_at'],
+                'ended_at' => $data['ended_at'] ?? null,
+                'monthly_fee_override' => $data['monthly_fee_override'] ?? null,
+                'session_fee_override' => $data['session_fee_override'] ?? null,
+                'registration_fee_override' => $data['registration_fee_override'] ?? null,
+                'notes' => $data['notes'] ?? null,
+                'created_by' => $data['created_by'] ?? null,
+            ]);
+        }
 
         return (int) $pdo->lastInsertId();
     }
@@ -239,7 +258,7 @@ class EnrollmentRepository
         $params = ['id' => $id];
 
         $allowedFields = [
-            'status', 'enrolled_at', 'ended_at', 'monthly_fee_override',
+            'status', 'enrolled_at', 'ended_at', 'monthly_fee_override', 'seasonal_fee_override',
             'session_fee_override', 'registration_fee_override', 'notes',
         ];
 
@@ -268,11 +287,6 @@ class EnrollmentRepository
         $stmt->execute(['id' => $id, 'status' => $status]);
     }
 
-    /**
-     * کلاسِ فعلی (تازه‌ترین ثبت‌نام فعال) هر بازیکن — برای نمایش در لیست/جزئیات بازیکن.
-     * اگر بازیکن در چند کلاس فعال ثبت‌نام شده باشد، تازه‌ترین برمی‌گردد.
-     * خروجی: [player_id => آرایه‌ی کلاس به شکل ClassDto اپ]
-     */
     public static function currentClassByPlayerIds(array $playerIds): array
     {
         if (empty($playerIds)) {
@@ -282,7 +296,6 @@ class EnrollmentRepository
         $pdo = Database::connection();
         $ids = implode(',', array_map('intval', $playerIds));
 
-        // تازه‌ترین ثبت‌نام فعال هر بازیکن
         $stmt = $pdo->prepare("
             SELECT player_id, class_id
             FROM football_enrollments
@@ -306,12 +319,13 @@ class EnrollmentRepository
         $classIds = implode(',', array_map('intval', array_unique($classIdByPlayer)));
 
         $stmt = $pdo->prepare("
-            SELECT c.*,
+            SELECT c.*, ag.title AS age_group_title,
                 (
                     SELECT COUNT(*) FROM football_enrollments e
                     WHERE e.class_id = c.id AND e.status = 'active' AND e.ended_at IS NULL
                 ) AS enrolled_count
             FROM football_classes c
+            LEFT JOIN football_age_groups ag ON ag.id = c.age_group_id
             WHERE c.id IN ({$classIds})
         ");
         $stmt->execute();
@@ -329,6 +343,7 @@ class EnrollmentRepository
             $out[$pid] = [
                 'id' => (int) $c['id'],
                 'title' => (string) $c['title'],
+                'age_group_title' => $c['age_group_title'] ?? null,
                 'season_id' => isset($c['season_id']) ? (int) $c['season_id'] : null,
                 'age_group_id' => isset($c['age_group_id']) ? (int) $c['age_group_id'] : null,
                 'coach_id' => isset($c['coach_id']) ? (int) $c['coach_id'] : null,
@@ -339,7 +354,10 @@ class EnrollmentRepository
                 'location' => $c['location'] ?? null,
                 'description' => $c['description'] ?? null,
                 'pricing_type' => $c['pricing_type'] ?? null,
+                'billing_cycle' => $c['billing_cycle'] ?? 'monthly',
                 'monthly_fee' => isset($c['monthly_fee']) ? (int) $c['monthly_fee'] : null,
+                'seasonal_fee' => isset($c['seasonal_fee']) ? (int) $c['seasonal_fee'] : null,
+                'billing_months' => isset($c['billing_months']) ? (int) $c['billing_months'] : (($c['billing_cycle'] ?? 'monthly') === 'seasonal' ? 3 : 1),
                 'session_fee' => isset($c['session_fee']) ? (int) $c['session_fee'] : null,
                 'registration_fee' => isset($c['registration_fee']) ? (int) $c['registration_fee'] : null,
                 'start_date' => $c['start_date'] ?? null,

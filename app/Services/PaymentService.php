@@ -93,7 +93,13 @@ class PaymentService
         $confirmedAt = null;
 
         if ($status === 'approved') {
-            $paidAt = date('Y-m-d H:i:s');
+            $paidAtRaw = trim((string) ($data['paid_at'] ?? ''));
+            if ($paidAtRaw !== '') {
+                $d = \DateTime::createFromFormat('Y-m-d', $paidAtRaw) ?: \DateTime::createFromFormat('Y-m-d H:i:s', $paidAtRaw);
+                $paidAt = $d ? $d->format('Y-m-d H:i:s') : date('Y-m-d H:i:s');
+            } else {
+                $paidAt = date('Y-m-d H:i:s');
+            }
             $confirmedBy = Auth::id();
             $confirmedAt = date('Y-m-d H:i:s');
         }

@@ -42,7 +42,7 @@ class AgeGroupRepository
                    AND p.birth_date <= ag.birth_date_to) AS players_count
             FROM football_age_groups ag
             WHERE {$whereSql}
-            ORDER BY ag.sort_order ASC, ag.id DESC
+            ORDER BY ag.birth_date_from DESC, ag.birth_date_to DESC, ag.sort_order ASC, ag.id DESC
             LIMIT {$perPage} OFFSET {$offset}
         ");
         $stmt->execute($params);
@@ -192,10 +192,19 @@ class AgeGroupRepository
      */
     public static function hasOverlap(string $from, string $to, ?int $exceptId = null): bool
     {
+        return !empty(self::getOverlapping($from, $to, $exceptId));
+    }
+
+    /**
+     * گروه‌های فعال متداخل با بازه داده شده
+     */
+    public static function getOverlapping(string $from, string $to, ?int $exceptId = null): array
+    {
         $pdo = Database::connection();
 
         $sql = '
-            SELECT id FROM football_age_groups
+            SELECT id, title, birth_date_from, birth_date_to, status
+            FROM football_age_groups
             WHERE status = "active"
               AND birth_date_from <= :birth_date_to AND birth_date_to >= :birth_date_from
         ';
@@ -210,11 +219,11 @@ class AgeGroupRepository
             $params['except_id'] = $exceptId;
         }
 
-        $sql .= ' LIMIT 1';
+        $sql .= ' ORDER BY birth_date_from ASC LIMIT 5';
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
 
-        return (bool) $stmt->fetch();
+        return $stmt->fetchAll();
     }
 }

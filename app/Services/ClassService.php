@@ -17,6 +17,7 @@ class ClassService
 {
     private const STATUSES = ['active', 'inactive', 'archived'];
     private const PRICING_TYPES = ['monthly', 'session', 'both'];
+    private const BILLING_CYCLES = ['monthly', 'seasonal', 'quarterly'];
 
     public static function list(array $query): array
     {
@@ -53,20 +54,46 @@ class ClassService
         $pricingType = trim((string) ($data['pricing_type'] ?? '')) ?: 'monthly';
         if (!in_array($pricingType, self::PRICING_TYPES, true)) throw new AppException('نوع شهریه معتبر نیست', 422);
 
+        $billingCycle = trim((string) ($data['billing_cycle'] ?? '')) ?: 'monthly';
+        // quarterly معادل seasonal است (۳ ماهه)
+        if ($billingCycle === 'quarterly') $billingCycle = 'seasonal';
+        if (!in_array($billingCycle, self::BILLING_CYCLES, true) && $billingCycle !== 'seasonal') {
+            // برای سازگاری، فقط monthly و seasonal را بپذیر
+            if (!in_array($billingCycle, ['monthly','seasonal'], true)) throw new AppException('دوره پرداخت معتبر نیست', 422);
+        }
+        if ($billingCycle === 'quarterly') $billingCycle = 'seasonal';
+
         $status = (string) ($data['status'] ?? 'active');
         if (!in_array($status, self::STATUSES, true)) throw new AppException('وضعیت کلاس معتبر نیست', 422);
 
         $seasonId = self::normalizeOptionalInt($data['season_id'] ?? null);
         $ageGroupId = self::normalizeOptionalInt($data['age_group_id'] ?? null);
+        // چند گروه سنی: age_group_ids — اگر نبود، از age_group_id قدیمی استفاده می‌شود
+        $ageGroupIds = self::normalizeAgeGroupIds($data['age_group_ids'] ?? null, $ageGroupId);
         $coachId = self::normalizeOptionalInt($data['coach_id'] ?? null);
         $assistantCoachId = self::normalizeOptionalInt($data['assistant_coach_id'] ?? null);
 
-        self::assertReferences($ageGroupId, $coachId, $assistantCoachId, $seasonId);
+        self::assertReferences($ageGroupIds[0] ?? null, $coachId, $assistantCoachId, $seasonId);
+        foreach ($ageGroupIds as $agId) {
+            if (!AgeGroupRepository::findById($agId)) throw new AppException('گروه سنی یافت نشد', 404);
+        }
 
         $capacity = self::normalizeCapacity($data['capacity'] ?? null);
         $monthlyFee = self::normalizeFee($data['monthly_fee'] ?? null);
+        $seasonalFee = self::normalizeFee($data['seasonal_fee'] ?? null);
         $sessionFee = self::normalizeFee($data['session_fee'] ?? null);
         $registrationFee = self::normalizeFee($data['registration_fee'] ?? null);
+
+        // اگر فصلی انتخاب شده ولی seasonal_fee خالی است، از monthly_fee*3 استفاده کن
+        if ($billingCycle === 'seasonal' && $seasonalFee === 0 && $monthlyFee > 0) {
+            $seasonalFee = $monthlyFee * 3;
+        }
+        // billing_months
+        $billingMonths = $billingCycle === 'seasonal' ? 3 : 1;
+        if (isset($data['billing_months'])) {
+            $bm = (int) $data['billing_months'];
+            if ($bm >= 1 && $bm <= 12) $billingMonths = $bm;
+        }
 
         $startDate = self::normalizeOptionalDate($data['start_date'] ?? null);
         $endDate = self::normalizeOptionalDate($data['end_date'] ?? null);
@@ -76,6 +103,7 @@ class ClassService
             'title' => $title,
             'season_id' => $seasonId,
             'age_group_id' => $ageGroupId,
+            'age_group_ids' => $ageGroupIds,
             'coach_id' => $coachId,
             'assistant_coach_id' => $assistantCoachId,
             'capacity' => $capacity,
@@ -83,7 +111,10 @@ class ClassService
             'location' => trim((string) ($data['location'] ?? '')) ?: null,
             'description' => trim((string) ($data['description'] ?? '')) ?: null,
             'pricing_type' => $pricingType,
+            'billing_cycle' => $billingCycle,
             'monthly_fee' => $monthlyFee,
+            'seasonal_fee' => $seasonalFee,
+            'billing_months' => $billingMonths,
             'session_fee' => $sessionFee,
             'registration_fee' => $registrationFee,
             'start_date' => $startDate,
@@ -120,6 +151,14 @@ class ClassService
             $updateData['pricing_type'] = $v;
         }
 
+        if (array_key_exists('billing_cycle', $data)) {
+            $v = trim((string) $data['billing_cycle']);
+            if ($v === 'quarterly') $v = 'seasonal';
+            if (!in_array($v, ['monthly','seasonal'], true)) throw new AppException('دوره پرداخت معتبر نیست', 422);
+            $updateData['billing_cycle'] = $v;
+            $updateData['billing_months'] = $v === 'seasonal' ? 3 : 1;
+        }
+
         if (array_key_exists('status', $data)) {
             $v = (string) $data['status'];
             if (!in_array($v, self::STATUSES, true)) throw new AppException('وضعیت معتبر نیست', 422);
@@ -130,9 +169,19 @@ class ClassService
             if (array_key_exists($f, $data)) $updateData[$f] = self::normalizeOptionalInt($data[$f]);
         }
 
+        // چند گروه سنی — اولویت با لیست age_group_ids
+        if (array_key_exists('age_group_ids', $data)) {
+            $ids = self::normalizeAgeGroupIds($data['age_group_ids'], null);
+            foreach ($ids as $agId) {
+                if (!AgeGroupRepository::findById($agId)) throw new AppException('گروه سنی یافت نشد', 404);
+            }
+            $updateData['age_group_ids'] = $ids;
+            unset($updateData['age_group_id']);
+        }
+
         if (array_key_exists('capacity', $data)) $updateData['capacity'] = self::normalizeCapacity($data['capacity']);
 
-        foreach (['monthly_fee', 'session_fee', 'registration_fee'] as $f) {
+        foreach (['monthly_fee', 'seasonal_fee', 'session_fee', 'registration_fee', 'billing_months'] as $f) {
             if (array_key_exists($f, $data)) $updateData[$f] = self::normalizeFee($data[$f]);
         }
 
@@ -207,6 +256,33 @@ class ClassService
         if (filter_var($value, FILTER_VALIDATE_INT) === false) throw new AppException('شناسه معتبر نیست', 422);
         $v = (int) $value;
         return $v > 0 ? $v : null;
+    }
+
+    /**
+     * لیست شناسه‌های گروه سنی (حداکثر یکی: آرایه یا رشته جداشده با کاما).
+     * اگر لیست خالی بود، به مقدار تک‌گانه $singleId برمی‌گردد.
+     */
+    private static function normalizeAgeGroupIds(mixed $value, ?int $singleId = null): array
+    {
+        $ids = [];
+
+        if (is_string($value) && trim($value) !== '') {
+            $value = array_filter(array_map('trim', explode(',', trim($value))));
+        }
+
+        if (is_array($value)) {
+            foreach ($value as $v) {
+                if (filter_var($v, FILTER_VALIDATE_INT) !== false && (int) $v > 0) {
+                    $ids[(int) $v] = (int) $v;
+                }
+            }
+        }
+
+        if (empty($ids) && $singleId !== null) {
+            $ids[$singleId] = $singleId;
+        }
+
+        return array_values($ids);
     }
 
     private static function normalizeCapacity(mixed $value): ?int

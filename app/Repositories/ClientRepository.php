@@ -245,6 +245,7 @@ class ClientRepository
 
     /**
      * وضعیت مالی یک بازیکن: جمع فاکتور/پرداخت + فاکتورهای فعال + پرداخت‌های در انتظار
+     * + جزئیات آیتم‌های هر فاکتور با عنوان کلاس + خلاصه بدهی به تفکیک کلاس
      */
     public static function financeForPlayer(int $playerId): array
     {
@@ -263,26 +264,100 @@ class ClientRepository
         // فاکتورهای فعال (غیر پیش‌نویس و غیر لغو)
         $stmt = $pdo->prepare("
             SELECT id, invoice_number, invoice_type, period_start_date, period_end_date,
-                   due_date, status, paid_total, remaining_total
+                   due_date, status, subtotal, discount_total, paid_total, remaining_total, notes
             FROM football_invoices
             WHERE player_id = :pid AND status NOT IN ('draft', 'cancelled')
             ORDER BY due_date ASC, id ASC
         ");
         $stmt->execute(['pid' => $playerId]);
+        $rawInvoices = $stmt->fetchAll();
+
         $invoices = [];
-        foreach ($stmt->fetchAll() as $i) {
+        $allInvoiceIds = [];
+        foreach ($rawInvoices as $i) {
+            $allInvoiceIds[] = (int) $i['id'];
+        }
+
+        // آیتم‌های فاکتورها با عنوان کلاس
+        $itemsByInvoice = [];
+        $classDebt = []; // class_id => [title, total, paid, remaining]
+        if (!empty($allInvoiceIds)) {
+            $ids = implode(',', $allInvoiceIds);
+            $stmt = $pdo->prepare("
+                SELECT ii.*, c.title AS class_title, ag.title AS age_group_title
+                FROM football_invoice_items ii
+                LEFT JOIN football_classes c ON c.id = ii.class_id
+                LEFT JOIN football_age_groups ag ON ag.id = c.age_group_id
+                WHERE ii.invoice_id IN ({$ids})
+                ORDER BY ii.id ASC
+            ");
+            $stmt->execute();
+            foreach ($stmt->fetchAll() as $it) {
+                $invId = (int) $it['invoice_id'];
+                $itemsByInvoice[$invId][] = [
+                    'id' => (int) $it['id'],
+                    'title' => (string) $it['title'],
+                    'item_type' => (string) $it['item_type'],
+                    'amount' => (int) $it['amount'],
+                    'quantity' => (int) $it['quantity'],
+                    'total' => (int) $it['total'],
+                    'class_id' => isset($it['class_id']) ? (int) $it['class_id'] : null,
+                    'class_title' => $it['class_title'] ?? null,
+                    'age_group_title' => $it['age_group_title'] ?? null,
+                    'description' => $it['description'] ?? null,
+                ];
+
+                // برای خلاصه به تفکیک کلاس
+                $classId = $it['class_id'] ? (int) $it['class_id'] : 0;
+                $classKey = $classId !== 0 ? $classId : -1;
+                if (!isset($classDebt[$classKey])) {
+                    $classDebt[$classKey] = [
+                        'class_id' => $classId !== 0 ? $classId : null,
+                        'class_title' => $it['class_title'] ?? ($classId === 0 ? 'سایر هزینه‌ها' : 'کلاس #' . $classId),
+                        'age_group_title' => $it['age_group_title'] ?? null,
+                        'total' => 0,
+                        'paid' => 0,
+                        'remaining' => 0,
+                        'items_count' => 0,
+                    ];
+                }
+                $classDebt[$classKey]['total'] += (int) $it['total'];
+                $classDebt[$classKey]['items_count']++;
+            }
+        }
+
+        foreach ($rawInvoices as $i) {
+            $id = (int) $i['id'];
+            $total = (int) $i['paid_total'] + (int) $i['remaining_total'];
             $invoices[] = [
-                'id' => (int) $i['id'],
+                'id' => $id,
                 'invoice_number' => (string) $i['invoice_number'],
                 'invoice_type' => (string) $i['invoice_type'],
                 'period_start_date' => $i['period_start_date'],
                 'period_end_date' => $i['period_end_date'],
                 'due_date' => $i['due_date'],
                 'status' => (string) $i['status'],
-                'total_amount' => (int) $i['paid_total'] + (int) $i['remaining_total'],
+                'subtotal' => (int) ($i['subtotal'] ?? $total),
+                'discount_total' => (int) ($i['discount_total'] ?? 0),
+                'total_amount' => $total,
                 'paid_amount' => (int) $i['paid_total'],
                 'remaining_amount' => (int) $i['remaining_total'],
+                'notes' => $i['notes'] ?? null,
+                'items' => $itemsByInvoice[$id] ?? [],
             ];
+        }
+
+        // توزیع paid/remaining به تفکیک کلاس بر اساس نسبت آیتم‌ها در هر فاکتور
+        foreach ($invoices as $inv) {
+            $invTotal = $inv['total_amount'] > 0 ? $inv['total_amount'] : 1;
+            foreach ($inv['items'] as $it) {
+                $classId = $it['class_id'] ? (int) $it['class_id'] : 0;
+                $classKey = $classId !== 0 ? $classId : -1;
+                if (!isset($classDebt[$classKey])) continue;
+                $ratio = $it['total'] / $invTotal;
+                $classDebt[$classKey]['paid'] += (int) round($inv['paid_amount'] * $ratio);
+                $classDebt[$classKey]['remaining'] += (int) round($inv['remaining_amount'] * $ratio);
+            }
         }
 
         // پرداخت‌های در انتظار تأیید
@@ -297,6 +372,55 @@ class ClientRepository
         $totalInvoiced = array_sum(array_map(fn($i) => $i['total_amount'], $invoices));
         $totalPaid = array_sum(array_map(fn($i) => $i['paid_amount'], $invoices));
 
+        // کلاس‌های فعلی بازیکن برای نمایش شهریه مصوب هر کلاس
+        $currentClasses = \App\Repositories\EnrollmentRepository::currentClassByPlayerIds([$playerId]);
+        $enrolledClassInfo = $currentClasses[$playerId] ?? null;
+        $classFees = [];
+        if (!empty($currentClasses)) {
+            $classIds = array_keys($currentClasses);
+            // شهریه مصوب هر کلاس - با پشتیبانی فصلی
+            $ids = implode(',', array_map('intval', $classIds));
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT c.id, c.title, c.monthly_fee, c.seasonal_fee, c.billing_cycle, c.billing_months, c.session_fee, c.registration_fee,
+                           ag.title AS age_group_title
+                    FROM football_classes c
+                    LEFT JOIN football_age_groups ag ON ag.id = c.age_group_id
+                    WHERE c.id IN ({$ids})
+                ");
+                $stmt->execute();
+                $rows = $stmt->fetchAll();
+            } catch (\Throwable $e) {
+                $stmt = $pdo->prepare("
+                    SELECT c.id, c.title, c.monthly_fee, c.session_fee, c.registration_fee,
+                           ag.title AS age_group_title
+                    FROM football_classes c
+                    LEFT JOIN football_age_groups ag ON ag.id = c.age_group_id
+                    WHERE c.id IN ({$ids})
+                ");
+                $stmt->execute();
+                $rows = $stmt->fetchAll();
+            }
+            foreach ($rows as $cc) {
+                $cid = (int) $cc['id'];
+                $classFees[] = [
+                    'class_id' => $cid,
+                    'class_title' => (string) $cc['title'],
+                    'age_group_title' => $cc['age_group_title'] ?? null,
+                    'monthly_fee' => isset($cc['monthly_fee']) ? (int) $cc['monthly_fee'] : null,
+                    'seasonal_fee' => isset($cc['seasonal_fee']) ? (int) $cc['seasonal_fee'] : null,
+                    'billing_cycle' => $cc['billing_cycle'] ?? 'monthly',
+                    'billing_months' => isset($cc['billing_months']) ? (int) $cc['billing_months'] : (($cc['billing_cycle'] ?? 'monthly') === 'seasonal' ? 3 : 1),
+                    'session_fee' => isset($cc['session_fee']) ? (int) $cc['session_fee'] : null,
+                    'registration_fee' => isset($cc['registration_fee']) ? (int) $cc['registration_fee'] : null,
+                    'enrolled' => true,
+                    'debt' => $classDebt[$cid]['remaining'] ?? 0,
+                    'paid' => $classDebt[$cid]['paid'] ?? 0,
+                    'total' => $classDebt[$cid]['total'] ?? 0,
+                ];
+            }
+        }
+
         return [
             [
                 'player_id' => (int) $c['player_id'],
@@ -304,9 +428,13 @@ class ClientRepository
                 'total_invoiced' => $totalInvoiced,
                 'total_paid' => $totalPaid,
                 'balance' => $totalInvoiced - $totalPaid,
+                'debt' => $totalInvoiced - $totalPaid,
                 'pending_payments' => (int) $pending['cnt'],
                 'pending_amount' => (int) $pending['total'],
                 'invoices' => $invoices,
+                'class_debts' => array_values($classDebt),
+                'class_fees' => $classFees,
+                'is_debtor' => ($totalInvoiced - $totalPaid) > 0,
             ],
         ];
     }
@@ -387,7 +515,7 @@ class ClientRepository
     // مسابقات بازیکن
     // ═════════════════════════════════════════════
 
-    /** مسابقات مرتبط با بازیکن: کلاس‌ها/گروه‌های سنی او یا حضور در ترکیب */
+    /** مسابقات مرتبط با بازیکن: کلاس‌ها/گروه‌های سنی او یا حضور در ترکیب + اطلاعات دعوت بازیکن */
     public static function matchesForPlayer(int $playerId): array
     {
         $classIds = self::playerClassIds($playerId);
@@ -399,9 +527,13 @@ class ClientRepository
         }
 
         if (empty($classIds) && empty($ageGroupIds)) {
-            // حتی بدون کلاس — مسابقه‌هایی که بازیکن در ترکیب آنهاست
             $stmt = $pdo->prepare('
-                SELECT m.*, NULL AS class_title, NULL AS age_group_title
+                SELECT m.id, m.title, m.match_type, m.class_id, m.age_group_id, m.opponent_team,
+                       m.match_date, m.match_time, m.location, m.status, m.home_score, m.away_score, m.notes, m.result,
+                       NULL AS class_title, NULL AS age_group_title,
+                       mp.invitation_status, mp.attendance_status, mp.jersey_number,
+                       mp.position, mp.goals, mp.assists, mp.yellow_cards, mp.red_cards,
+                       mp.minutes_played, mp.rating, mp.notes AS player_notes
                 FROM football_matches m
                 INNER JOIN football_match_players mp ON mp.match_id = m.id AND mp.player_id = :pid
                 ORDER BY m.match_date DESC, m.match_time DESC, m.id DESC
@@ -424,16 +556,21 @@ class ClientRepository
             $ors[] = "m.age_group_id IN ({$in})";
             $params = array_merge($params, $p);
         }
-        $ors[] = 'm.id IN (SELECT mp.match_id FROM football_match_players mp WHERE mp.player_id = :pid)';
+        $ors[] = 'm.id IN (SELECT mp2.match_id FROM football_match_players mp2 WHERE mp2.player_id = :pid2)';
         $params['pid'] = $playerId;
+        $params['pid2'] = $playerId;
 
         $stmt = $pdo->prepare("
             SELECT m.id, m.title, m.match_type, m.class_id, m.age_group_id, m.opponent_team,
-                   m.match_date, m.match_time, m.location, m.status, m.home_score, m.away_score, m.notes,
-                   c.title AS class_title, ag.title AS age_group_title
+                   m.match_date, m.match_time, m.location, m.status, m.home_score, m.away_score, m.notes, m.result,
+                   c.title AS class_title, ag.title AS age_group_title,
+                   mp.invitation_status, mp.attendance_status, mp.jersey_number,
+                   mp.position, mp.goals, mp.assists, mp.yellow_cards, mp.red_cards,
+                   mp.minutes_played, mp.rating, mp.notes AS player_notes
             FROM football_matches m
             LEFT JOIN football_classes c ON c.id = m.class_id
             LEFT JOIN football_age_groups ag ON ag.id = m.age_group_id
+            LEFT JOIN football_match_players mp ON mp.match_id = m.id AND mp.player_id = :pid
             WHERE (" . implode(' OR ', $ors) . ")
             ORDER BY m.match_date DESC, m.match_time DESC, m.id DESC
             LIMIT 100
@@ -520,6 +657,29 @@ class ClientRepository
         }
 
         return array_values($out);
+    }
+
+    // ═════════════════════════════════════════════
+    // ارزیابی عملکرد بازیکن (برای نمایش توضیح مربی در هر جلسه)
+    // ═════════════════════════════════════════════
+
+    public static function evaluationsForPlayer(int $playerId): array
+    {
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare('
+            SELECT ev.*, s.session_date, s.start_time, s.class_id, c.title AS class_title,
+                   u.full_name AS coach_name
+            FROM football_evaluations ev
+            LEFT JOIN football_sessions s ON s.id = ev.session_id
+            LEFT JOIN football_classes c ON c.id = s.class_id
+            LEFT JOIN football_coaches co ON co.id = ev.coach_id
+            LEFT JOIN football_users u ON u.id = co.user_id
+            WHERE ev.player_id = :pid AND ev.status = "active"
+            ORDER BY s.session_date DESC, ev.id DESC
+            LIMIT 200
+        ');
+        $stmt->execute(['pid' => $playerId]);
+        return $stmt->fetchAll();
     }
 
     // ═════════════════════════════════════════════

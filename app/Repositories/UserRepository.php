@@ -38,8 +38,20 @@ class UserRepository
         $params = [];
 
         if (!empty($filters['role'])) {
-            $where[] = 'u.role = :role';
-            $params['role'] = $filters['role'];
+            if ($filters['role'] === 'coach') {
+                /*
+                 * فیلتر «مربی»: علاوه بر کاربرانی که role=coach هستند،
+                 * کاربرانی که مربی نیز هستند (رکورد در football_coaches)
+                 * مثل ادمینی که هم‌زمان مربی هم هست، نمایش داده شوند.
+                 */
+                $where[] = '(u.role = :role OR EXISTS (
+                    SELECT 1 FROM football_coaches fc WHERE fc.user_id = u.id
+                ))';
+                $params['role'] = 'coach';
+            } else {
+                $where[] = 'u.role = :role';
+                $params['role'] = $filters['role'];
+            }
         }
         if (!empty($filters['exclude_role'])) {
             $where[] = 'u.role <> :exclude_role';
@@ -139,7 +151,7 @@ class UserRepository
         $pdo = Database::connection();
         $sets = [];
         $params = ['id' => $id];
-        $allowedFields = ['full_name', 'mobile', 'national_code', 'avatar_path', 'role', 'status'];
+        $allowedFields = ['full_name', 'mobile', 'national_code', 'avatar_path', 'role', 'status', 'email'];
 
         foreach ($allowedFields as $field) {
             if (array_key_exists($field, $data)) {

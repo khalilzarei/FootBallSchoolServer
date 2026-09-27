@@ -173,8 +173,19 @@ class MatchRepository
         ');
 
         $stmt->execute(['match_id' => $matchId]);
+        $rows = $stmt->fetchAll();
 
-        return $stmt->fetchAll();
+        return array_map(static function (array $row): array {
+            $row['player'] = [
+                'id' => (int) $row['player_id'],
+                'first_name' => (string) ($row['first_name'] ?? ''),
+                'last_name' => (string) ($row['last_name'] ?? ''),
+                'full_name' => trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? '')),
+                'birth_date' => $row['birth_date'] ?? null,
+                'age' => isset($row['age']) ? (int) $row['age'] : null,
+            ];
+            return $row;
+        }, $rows);
     }
 
     public static function findMatchPlayerById(int $id): ?array
@@ -182,7 +193,8 @@ class MatchRepository
         $pdo = Database::connection();
 
         $stmt = $pdo->prepare('
-            SELECT mp.*, p.first_name, p.last_name
+            SELECT mp.*, p.first_name, p.last_name, p.birth_date,
+                   TIMESTAMPDIFF(YEAR, p.birth_date, CURDATE()) AS age
             FROM football_match_players mp
             INNER JOIN football_players p ON p.id = mp.player_id
             WHERE mp.id = :id
@@ -190,9 +202,18 @@ class MatchRepository
         ');
 
         $stmt->execute(['id' => $id]);
-        $matchPlayer = $stmt->fetch();
+        $row = $stmt->fetch();
+        if (!$row) return null;
 
-        return $matchPlayer ?: null;
+        $row['player'] = [
+            'id' => (int) $row['player_id'],
+            'first_name' => (string) ($row['first_name'] ?? ''),
+            'last_name' => (string) ($row['last_name'] ?? ''),
+            'full_name' => trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? '')),
+            'birth_date' => $row['birth_date'] ?? null,
+            'age' => isset($row['age']) ? (int) $row['age'] : null,
+        ];
+        return $row;
     }
 
     public static function findMatchPlayer(int $matchId, int $playerId): ?array

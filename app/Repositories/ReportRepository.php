@@ -84,9 +84,14 @@ class ReportRepository
     {
         $pdo = Database::connection();
 
+        // بدهی کلی هر بازیکن
         $stmt = $pdo->prepare('
             SELECT p.id AS player_id, p.first_name, p.last_name,
-                   COALESCE(SUM(i.remaining_total), 0) AS debt
+                   CONCAT(p.first_name, " ", p.last_name) AS player_name,
+                   COALESCE(SUM(i.remaining_total), 0) AS debt,
+                   COALESCE(SUM(i.paid_total),0) AS paid,
+                   COALESCE(SUM(i.subtotal),0) AS total,
+                   MIN(i.due_date) AS oldest_due_date
             FROM football_players p
             LEFT JOIN football_invoices i ON i.player_id = p.id AND i.status IN ("open", "partial")
             WHERE p.deleted_at IS NULL
@@ -95,10 +100,55 @@ class ReportRepository
             ORDER BY debt DESC
             LIMIT 200
         ');
-
         $stmt->execute();
+        $players = $stmt->fetchAll();
 
-        return $stmt->fetchAll();
+        // برای هر بازیکن بدهی به تفکیک کلاس
+        $playerIds = array_map(fn($r) => (int)$r['player_id'], $players);
+        $classDebtsByPlayer = [];
+
+        if (!empty($playerIds)) {
+            $ids = implode(',', $playerIds);
+            $stmt = $pdo->prepare("
+                SELECT inv.player_id, ii.class_id, c.title AS class_title, ag.title AS age_group_title,
+                       SUM(ii.total) AS class_total,
+                       SUM(ROUND(inv.paid_total * (ii.total / NULLIF(inv.subtotal,0)))) AS class_paid,
+                       SUM(ROUND(inv.remaining_total * (ii.total / NULLIF(inv.subtotal,0)))) AS class_remaining
+                FROM football_invoices inv
+                INNER JOIN football_invoice_items ii ON ii.invoice_id = inv.id
+                LEFT JOIN football_classes c ON c.id = ii.class_id
+                LEFT JOIN football_age_groups ag ON ag.id = c.age_group_id
+                WHERE inv.player_id IN ({$ids}) AND inv.status IN ('open','partial')
+                GROUP BY inv.player_id, ii.class_id, c.title, ag.title
+                ORDER BY inv.player_id, class_remaining DESC
+            ");
+            $stmt->execute();
+            foreach ($stmt->fetchAll() as $row) {
+                $pid = (int)$row['player_id'];
+                $classDebtsByPlayer[$pid][] = [
+                    'class_id' => $row['class_id'] ? (int)$row['class_id'] : null,
+                    'class_title' => $row['class_title'] ?? ($row['class_id'] ? 'کلاس #'.$row['class_id'] : 'سایر هزینه‌ها'),
+                    'age_group_title' => $row['age_group_title'] ?? null,
+                    'total' => (int)($row['class_total'] ?? 0),
+                    'paid' => (int)($row['class_paid'] ?? 0),
+                    'remaining' => (int)($row['class_remaining'] ?? 0),
+                ];
+            }
+        }
+
+        foreach ($players as &$p) {
+            $pid = (int)$p['player_id'];
+            $p['player_name'] = $p['player_name'] ?? trim($p['first_name'].' '.$p['last_name']);
+            $p['total_debt'] = (int)($p['debt'] ?? 0);
+            $p['total'] = (int)($p['total'] ?? 0);
+            $p['paid'] = (int)($p['paid'] ?? 0);
+            $p['oldest_invoice_date'] = $p['oldest_due_date'] ?? null;
+            $p['overdue_debt'] = $p['debt'];
+            $p['class_debts'] = $classDebtsByPlayer[$pid] ?? [];
+            $p['is_debtor'] = $p['debt'] > 0;
+        }
+
+        return $players;
     }
 
     public static function attendance(array $filters): array

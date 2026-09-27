@@ -184,17 +184,75 @@ class PaymentRepository
         $stmt->execute(['amount' => $amount, 'amount2' => $amount, 'id' => $installmentId]);
     }
 
+    public static function balancesForPlayerIds(array $playerIds): array
+    {
+        if (empty($playerIds)) return [];
+        $pdo = Database::connection();
+        $playerIds = array_map('intval', $playerIds);
+        $in = implode(',', $playerIds);
+
+        $stmt = $pdo->prepare("
+            SELECT player_id,
+                   COALESCE(SUM(CASE WHEN status NOT IN ('draft','cancelled') THEN remaining_total ELSE 0 END),0) AS debt,
+                   COALESCE(SUM(CASE WHEN status NOT IN ('draft','cancelled') THEN subtotal ELSE 0 END),0) AS total_invoiced,
+                   COALESCE(SUM(CASE WHEN status NOT IN ('draft','cancelled') THEN paid_total ELSE 0 END),0) AS total_paid,
+                   COUNT(CASE WHEN status IN ('open','partial','overdue') THEN 1 END) AS open_invoices
+            FROM football_invoices
+            WHERE player_id IN ($in)
+            GROUP BY player_id
+        ");
+        $stmt->execute();
+        $rows = $stmt->fetchAll();
+
+        $map = [];
+        foreach ($rows as $r) {
+            $pid = (int) $r['player_id'];
+            $debt = (int) $r['debt'];
+            $map[$pid] = [
+                'player_id' => $pid,
+                'debt' => $debt,
+                'total_invoiced' => (int) $r['total_invoiced'],
+                'total_paid' => (int) $r['total_paid'],
+                'balance' => $debt,
+                'is_debtor' => $debt > 0,
+                'open_invoices' => (int) $r['open_invoices'],
+            ];
+        }
+
+        // برای بازیکنان بدون فاکتور، مقدار صفر برگردان
+        foreach ($playerIds as $pid) {
+            if (!isset($map[$pid])) {
+                $map[$pid] = [
+                    'player_id' => $pid,
+                    'debt' => 0,
+                    'total_invoiced' => 0,
+                    'total_paid' => 0,
+                    'balance' => 0,
+                    'is_debtor' => false,
+                    'open_invoices' => 0,
+                ];
+            }
+        }
+
+        return $map;
+    }
+
     public static function playerBalance(int $playerId): array
     {
         $pdo = Database::connection();
 
+        // خلاصه کلی بدهی
         $stmt = $pdo->prepare('
-            SELECT COALESCE(SUM(remaining_total), 0) AS debt
+            SELECT COALESCE(SUM(remaining_total), 0) AS debt,
+                   COALESCE(SUM(subtotal),0) AS total_invoiced,
+                   COALESCE(SUM(paid_total),0) AS total_paid_calc
             FROM football_invoices
-            WHERE player_id = :player_id AND status <> "cancelled"
+            WHERE player_id = :player_id AND status NOT IN ("draft","cancelled")
         ');
         $stmt->execute(['player_id' => $playerId]);
-        $debt = (int) $stmt->fetch()['debt'];
+        $row = $stmt->fetch();
+        $debt = (int) ($row['debt'] ?? 0);
+        $totalInvoiced = (int) ($row['total_invoiced'] ?? 0);
 
         $stmt = $pdo->prepare('
             SELECT COALESCE(SUM(amount), 0) AS total_paid
@@ -205,18 +263,128 @@ class PaymentRepository
         $totalPaid = (int) $stmt->fetch()['total_paid'];
 
         $stmt = $pdo->prepare('
-            SELECT COUNT(*) AS pending_count
+            SELECT COUNT(*) AS pending_count, COALESCE(SUM(amount),0) AS pending_amount
             FROM football_payments
             WHERE player_id = :player_id AND status = "pending"
         ');
         $stmt->execute(['player_id' => $playerId]);
-        $pendingCount = (int) $stmt->fetch()['pending_count'];
+        $pendingRow = $stmt->fetch();
+        $pendingCount = (int) ($pendingRow['pending_count'] ?? 0);
+        $pendingAmount = (int) ($pendingRow['pending_amount'] ?? 0);
+
+        // بدهی به تفکیک کلاس (از آیتم‌های فاکتور)
+        $stmt = $pdo->prepare('
+            SELECT ii.class_id, c.title AS class_title, ag.title AS age_group_title,
+                   SUM(ii.total) AS class_total
+            FROM football_invoice_items ii
+            INNER JOIN football_invoices inv ON inv.id = ii.invoice_id AND inv.status NOT IN ("draft","cancelled")
+            LEFT JOIN football_classes c ON c.id = ii.class_id
+            LEFT JOIN football_age_groups ag ON ag.id = c.age_group_id
+            WHERE inv.player_id = :player_id
+            GROUP BY ii.class_id, c.title, ag.title
+            ORDER BY c.title ASC
+        ');
+        $stmt->execute(['player_id' => $playerId]);
+        $classTotals = $stmt->fetchAll();
+
+        // برای هر کلاس، سهم پرداخت شده و باقی‌مانده را بر اساس نسبت آیتم‌ها حساب می‌کنیم
+        $classDebts = [];
+        // ابتدا فاکتورها و آیتم‌هایشان را می‌گیریم تا توزیع دقیق انجام شود
+        $stmt = $pdo->prepare('
+            SELECT inv.id, inv.paid_total, inv.remaining_total,
+                   ii.class_id, ii.total, c.title AS class_title, ag.title AS age_group_title
+            FROM football_invoices inv
+            INNER JOIN football_invoice_items ii ON ii.invoice_id = inv.id
+            LEFT JOIN football_classes c ON c.id = ii.class_id
+            LEFT JOIN football_age_groups ag ON ag.id = c.age_group_id
+            WHERE inv.player_id = :player_id AND inv.status NOT IN ("draft","cancelled")
+        ');
+        $stmt->execute(['player_id' => $playerId]);
+        $rows = $stmt->fetchAll();
+
+        $map = []; // class_id => [title, total, paid, remaining]
+        foreach ($rows as $r) {
+            $cid = $r['class_id'] ? (int)$r['class_id'] : 0;
+            $key = $cid !== 0 ? $cid : -1;
+            $invTotal = (int)$r['paid_total'] + (int)$r['remaining_total'];
+            if ($invTotal <= 0) $invTotal = 1;
+            $ratio = (int)$r['total'] / $invTotal;
+
+            if (!isset($map[$key])) {
+                $map[$key] = [
+                    'class_id' => $cid !== 0 ? $cid : null,
+                    'class_title' => $r['class_title'] ?? ($cid === 0 ? 'سایر هزینه‌ها' : 'کلاس #'.$cid),
+                    'age_group_title' => $r['age_group_title'] ?? null,
+                    'total' => 0,
+                    'paid' => 0,
+                    'remaining' => 0,
+                ];
+            }
+            $map[$key]['total'] += (int)$r['total'];
+            $map[$key]['paid'] += (int) round((int)$r['paid_total'] * $ratio);
+            $map[$key]['remaining'] += (int) round((int)$r['remaining_total'] * $ratio);
+        }
+        $classDebts = array_values($map);
+
+        // کلاس‌های فعلی بازیکن با شهریه مصوب - با پشتیبانی فصلی
+        $currentClasses = \App\Repositories\EnrollmentRepository::currentClassByPlayerIds([$playerId]);
+        $classFees = [];
+        if (!empty($currentClasses)) {
+            $classIds = array_keys($currentClasses);
+            $ids = implode(',', array_map('intval', $classIds));
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT c.id, c.title, c.monthly_fee, c.seasonal_fee, c.billing_cycle, c.billing_months, c.session_fee, c.registration_fee,
+                           ag.title AS age_group_title
+                    FROM football_classes c
+                    LEFT JOIN football_age_groups ag ON ag.id = c.age_group_id
+                    WHERE c.id IN ({$ids})
+                ");
+                $stmt->execute();
+                $classRows = $stmt->fetchAll();
+            } catch (\Throwable $e) {
+                $stmt = $pdo->prepare("
+                    SELECT c.id, c.title, c.monthly_fee, c.session_fee, c.registration_fee,
+                           ag.title AS age_group_title
+                    FROM football_classes c
+                    LEFT JOIN football_age_groups ag ON ag.id = c.age_group_id
+                    WHERE c.id IN ({$ids})
+                ");
+                $stmt->execute();
+                $classRows = $stmt->fetchAll();
+            }
+            foreach ($classRows as $cc) {
+                $cid = (int)$cc['id'];
+                $debtForClass = 0;
+                foreach ($classDebts as $cd) {
+                    if (($cd['class_id'] ?? null) === $cid) { $debtForClass = $cd['remaining']; break; }
+                }
+                $classFees[] = [
+                    'class_id' => $cid,
+                    'class_title' => (string)$cc['title'],
+                    'age_group_title' => $cc['age_group_title'] ?? null,
+                    'monthly_fee' => isset($cc['monthly_fee']) ? (int)$cc['monthly_fee'] : null,
+                    'seasonal_fee' => isset($cc['seasonal_fee']) ? (int)$cc['seasonal_fee'] : null,
+                    'billing_cycle' => $cc['billing_cycle'] ?? 'monthly',
+                    'billing_months' => isset($cc['billing_months']) ? (int)$cc['billing_months'] : (($cc['billing_cycle'] ?? 'monthly') === 'seasonal' ? 3 : 1),
+                    'session_fee' => isset($cc['session_fee']) ? (int)$cc['session_fee'] : null,
+                    'registration_fee' => isset($cc['registration_fee']) ? (int)$cc['registration_fee'] : null,
+                    'debt' => $debtForClass,
+                ];
+            }
+        }
 
         return [
             'player_id' => $playerId,
             'debt' => $debt,
+            'total_invoiced' => $totalInvoiced,
             'total_paid' => $totalPaid,
             'pending_payments_count' => $pendingCount,
+            'pending_amount' => $pendingAmount,
+            'balance' => $debt,
+            'is_debtor' => $debt > 0,
+            'class_debts' => $classDebts,
+            'class_fees' => $classFees,
         ];
     }
 }

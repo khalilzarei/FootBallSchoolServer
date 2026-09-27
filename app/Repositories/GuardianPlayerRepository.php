@@ -155,6 +155,21 @@ class GuardianPlayerRepository
         return $stmt->fetchAll();
     }
 
+    public static function updateRelation(int $guardianId, int $playerId, array $data): void
+    {
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare('
+            UPDATE football_guardians_players
+            SET relation = :relation, updated_at = NOW()
+            WHERE guardian_id = :guardian_id AND player_id = :player_id AND status = "active"
+        ');
+        $stmt->execute([
+            'relation' => $data['relation'] ?? 'other',
+            'guardian_id' => $guardianId,
+            'player_id' => $playerId,
+        ]);
+    }
+
     public static function hasActiveEnrollment(int $classId, int $playerId): bool
     {
         $pdo = Database::connection();

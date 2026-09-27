@@ -9,6 +9,116 @@ use App\Services\AvatarService;
 
 class ChatRepository
 {
+    /** آفست ثانیه‌ای بین ساعت DB و UTC واقعی (مثلاً -14400 برای UTC-4) */
+    private static ?int $dbOffsetSecondsCache = null;
+
+    /** آیا ستون delivered_at در جدول پیام‌ها موجود است؟ (cache) */
+    private static ?bool $hasDeliveredAtCache = null;
+
+    /**
+     * آفست (ثانیه) بین NOW() دیتابیس و UTC_TIMESTAMP().
+     * سرور دیتابیس ممکن است در timezone متفاوتی از UTC باشد؛
+     * این مقدار آن اختلاف را به‌صورت دقیق برمی‌گرداند.
+     */
+    private static function dbOffsetSeconds(): int
+    {
+        if (self::$dbOffsetSecondsCache === null) {
+            $pdo = Database::connection();
+
+            $sec = $pdo->query(
+                'SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW())'
+            )->fetchColumn();
+
+            self::$dbOffsetSecondsCache = (int) $sec;
+        }
+
+        return self::$dbOffsetSecondsCache;
+    }
+
+    /**
+     * تبدیل رشته‌ی زمانیِ timezone دیتابیس (Y-m-d H:i:s) به UTC واقعی.
+     *
+     * بدون این تبدیل، created_at پیام‌ها (که با NOW() ذخیره شده‌اند)
+     * ممکن است چند ساعت با ساعت واقعی اختلاف داشته باشد
+     * و نمایش زمان در کلاینت اشتباه شود.
+     */
+    private static function toUtcIso(string $raw): ?string
+    {
+        $raw = trim($raw);
+
+        if ($raw === '' || $raw === '0000-00-00 00:00:00') {
+            return null;
+        }
+
+        $dt = \DateTime::createFromFormat(
+            'Y-m-d H:i:s',
+            $raw,
+            new \DateTimeZone('UTC')
+        );
+
+        if ($dt === false) {
+            return null;
+        }
+
+        return gmdate(
+            'Y-m-d H:i:s',
+            $dt->getTimestamp() - self::dbOffsetSeconds()
+        );
+    }
+
+    /** آیا football_chat_messages.delivered_at وجود دارد؟ */
+    private static function hasDeliveredAtColumn(): bool
+    {
+        if (self::$hasDeliveredAtCache === null) {
+            try {
+                $pdo = Database::connection();
+                $col = $pdo->query(
+                    "SHOW COLUMNS FROM football_chat_messages LIKE 'delivered_at'"
+                )->fetchColumn();
+                self::$hasDeliveredAtCache = $col !== false;
+            } catch (\Throwable $e) {
+                self::$hasDeliveredAtCache = false;
+            }
+        }
+
+        return self::$hasDeliveredAtCache;
+    }
+
+    /**
+     * علامت‌گذاری پیام‌های کاربرانِ دیگرِ اتاق به‌عنوان «تحویل‌شده»
+     * به $userId (یعنی اپِ گیرنده پیام‌ها را دریافت کرده است).
+     *
+     * نکته: پیام‌های خودِ کاربر هرگز علامت نمی‌خورند —
+     * این‌طوری پولینگِ خودِ فرستنده، پیام‌های او را
+     * اشتباهاً «تحویل‌شده» نمی‌کند.
+     *
+     * برای تیک ✓✓ (دو تیک خاکستری) در سمت فرستنده استفاده می‌شود.
+     */
+    public static function markMessagesDelivered(
+        int $roomId,
+        int $userId
+    ): void {
+        if (!self::hasDeliveredAtColumn()) {
+            return;
+        }
+
+        $pdo = Database::connection();
+
+        $stmt = $pdo->prepare('
+            UPDATE football_chat_messages
+            SET delivered_at = UTC_TIMESTAMP()
+            WHERE chat_room_id = :chat_room_id
+              AND sender_id != :user_id
+              AND deleted_at IS NULL
+              AND delivered_at IS NULL
+        ');
+
+        $stmt->execute([
+            'chat_room_id' => $roomId,
+            'user_id' => $userId,
+        ]);
+    }
+
     public static function roomsForUser(int $userId): array
     {
         $pdo = Database::connection();
@@ -79,7 +189,101 @@ class ChatRepository
      *
      * ترتیب user1/user2 مهم نیست.
      */
-   public static function findPrivateRoom( int $user1Id, int $user2Id ): ?array { $pdo = Database::connection(); /* * برای اتاق خصوصی جدید، این ستون‌ها باید وجود داشته باشند. * اگر migration هنوز اجرا نشده باشد، null برمی‌گردانیم. */ if ( !self::hasColumn( 'football_chat_rooms', 'is_group' ) || !self::hasColumn( 'football_chat_rooms', 'user1_id' ) || !self::hasColumn( 'football_chat_rooms', 'user2_id' ) ) { return null; } /* * هر placeholder فقط یک بار استفاده شده است. * * این کار برای جلوگیری از: * SQLSTATE[HY093]: Invalid parameter number * * انجام شده است. */ $stmt = $pdo->prepare(' SELECT * FROM football_chat_rooms WHERE is_group = 0 AND status = "active" AND ( ( user1_id = :user1_a AND user2_id = :user2_a ) OR ( user1_id = :user2_b AND user2_id = :user1_b ) ) LIMIT 1 '); $stmt->execute([ 'user1_a' => $user1Id, 'user2_a' => $user2Id, 'user2_b' => $user2Id, 'user1_b' => $user1Id, ]); $room = $stmt->fetch(); return $room ?: null; }
+   public static function findPrivateRoom( int $user1Id, int $user2Id ): ?array {
+        $pdo = Database::connection();
+
+        $ids = [$user1Id, $user2Id];
+        sort( $ids );
+        $key = hash( 'sha256', 'private-' . implode( '-', $ids ) );
+
+        $hasUserColumns = self::hasColumn( 'football_chat_rooms', 'is_group' )
+            && self::hasColumn( 'football_chat_rooms', 'user1_id' )
+            && self::hasColumn( 'football_chat_rooms', 'user2_id' );
+
+        /*
+         * مسیر ۱ (روایی رسمی): unique_key
+         *
+         * همه‌ی روم‌های خصوصی قدیم و جدید این key را دارند
+         * (یا باید داشته باشند) و UNIQUE index روی آن تعریف شده است.
+         */
+        $room = self::findByUniqueKey( $key );
+
+        /*
+         * مسیر ۲: ستون‌های user1_id/user2_id (اسکیمای جدید).
+         *
+         * برای روم‌هایی که unique_key خالی هستند (اسکیمای خیلی قدیمی)
+         * — این مسیر آن‌ها پیدا می‌کند و دیگر روم تکراری ساخته نمی‌شود.
+         */
+        if ( $room === null && $hasUserColumns ) {
+            $stmt = $pdo->prepare( '
+                SELECT *
+                FROM football_chat_rooms
+                WHERE is_group = 0
+                  AND status = "active"
+                  AND (
+                      ( user1_id = :user1_a AND user2_id = :user2_a )
+                      OR
+                      ( user1_id = :user2_b AND user2_id = :user1_b )
+                  )
+                LIMIT 1
+            ' );
+            $stmt->execute( [
+                'user1_a' => $user1Id,
+                'user2_a' => $user2Id,
+                'user2_b' => $user2Id,
+                'user1_b' => $user1Id,
+            ] );
+            $room = $stmt->fetch() ?: null;
+        }
+
+        if ( $room === null ) {
+            return null;
+        }
+
+        $roomId = (int) $room['id'];
+
+        /*
+         * تکمیل idempotent داده‌های از دست‌رفته:
+         *  - روم پیدا شده با unique_key ولی بدون user1/user2 → userها ثبت می‌شود
+         *  - روم پیدا شده با user1/user2 ولی بدون unique_key → key ثبت می‌شود
+         *
+         * اگر unique_key با روم دیگری برخورد کند (یعنی دو روم تکراری
+         * وجود دارد)، خطا نادیده گرفته می‌شود؛ ادغام روم‌های تکراری
+         * توسط اسکریپت fix_duplicate_chat_rooms.php انجام می‌شود.
+         */
+        try {
+            if ( $hasUserColumns
+                && ( empty( $room['user1_id'] ) || empty( $room['user2_id'] ) ) ) {
+                $upd = $pdo->prepare( '
+                    UPDATE football_chat_rooms
+                    SET user1_id = :user1_id,
+                        user2_id = :user2_id
+                    WHERE id = :id
+                ' );
+                $upd->execute( [
+                    'user1_id' => $ids[0],
+                    'user2_id' => $ids[1],
+                    'id' => $roomId,
+                ] );
+            }
+
+            if ( empty( $room['unique_key'] ) ) {
+                $upd = $pdo->prepare( '
+                    UPDATE football_chat_rooms
+                    SET unique_key = :unique_key
+                    WHERE id = :id
+                ' );
+                $upd->execute( [
+                    'unique_key' => $key,
+                    'id' => $roomId,
+                ] );
+            }
+        } catch ( \PDOException $e ) {
+            /* برخورد unique_key: روم تکراری وجود دارد — بدون تغییر */
+        }
+
+        return $room;
+    }
 
     /**
      * ساخت اتاق چت.
@@ -236,6 +440,63 @@ class ChatRepository
         $stmt->execute($params);
 
         return (int) $pdo->lastInsertId();
+    }
+
+    /**
+     * تغییر عنوان روم (فقط اگر ستون title در اسکیمای فعلی وجود داشته باشد).
+     */
+    public static function updateRoomTitle(
+        int $roomId,
+        string $title
+    ): void {
+        if (!self::hasColumn('football_chat_rooms', 'title')) {
+            return;
+        }
+
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare(
+            'UPDATE football_chat_rooms SET title = :title WHERE id = :id'
+        );
+        $stmt->execute([
+            'title' => $title,
+            'id' => $roomId,
+        ]);
+    }
+
+    /**
+     * همگام‌سازی ارجاعات structural روم به کلاس/گروه سنی.
+     *
+     * برای روم‌هایی که قبل از موجود شدن ستون‌ها ساخته شده‌اند
+     * (createRoom آن‌ها را بی‌صدا رد می‌کرد) مقدار صحیح را می‌گذارد.
+     * فقط ستون‌های موجود در اسکیمای فعلی به‌روز می‌شوند.
+     */
+    public static function syncRoomEntityRefs(
+        int $roomId,
+        ?int $classId,
+        ?int $ageGroupId
+    ): void {
+        $sets = [];
+        $params = ['id' => $roomId];
+
+        if ($classId !== null && self::hasColumn('football_chat_rooms', 'class_id')) {
+            $sets[] = 'class_id = :class_id';
+            $params['class_id'] = $classId;
+        }
+
+        if ($ageGroupId !== null && self::hasColumn('football_chat_rooms', 'age_group_id')) {
+            $sets[] = 'age_group_id = :age_group_id';
+            $params['age_group_id'] = $ageGroupId;
+        }
+
+        if (empty($sets)) {
+            return;
+        }
+
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare(
+            'UPDATE football_chat_rooms SET ' . implode(', ', $sets) . ' WHERE id = :id'
+        );
+        $stmt->execute($params);
     }
 
     public static function isMember(
@@ -778,9 +1039,20 @@ class ChatRepository
 
             'read_at' => null,
 
-            'sent_at' => $row['sent_at'] ?? null,
+            /*
+             * NOW() دیتابیس ممکن است در timezone غیر از UTC باشد؛
+             * sent_at و created_at به‌عنوان UTC واقعی ارسال می‌شوند
+             * تا کلاینت بتواند آن‌ها را با timezone کاربر نمایش دهد.
+             */
+            'sent_at' => self::toUtcIso((string) ($row['sent_at'] ?? '')),
 
-            'created_at' => $row['created_at'] ?? null,
+            'created_at' => self::toUtcIso((string) ($row['created_at'] ?? '')),
+
+            /*
+             * زمان تحویل پیام به اپِ گیرنده (UTC — مستقیم از ستون).
+             * برای تیک ✓✓ در سمت فرستنده. null = هنوز تحویل نشده.
+             */
+            'delivered_at' => $row['delivered_at'] ?? null,
         ];
     }
 
@@ -1194,16 +1466,28 @@ class ChatRepository
             return self::ageGroupRooms();
         }
 
-        $stmt = $pdo->query('
+        /*
+         * age_group_id ممکن است هنوز در اسکیمای دیتابیس نباشد
+         * (migration جدا) — شرط را فقط وقتی ستون موجود است اضافه می‌کنیم.
+         */
+        $ageGroupPart = self::hasColumn(
+                'football_chat_rooms',
+                'age_group_id'
+            )
+            ? 'age_group_id IS NOT NULL OR'
+            : '';
+
+        $stmt = $pdo->query(
+            "
             SELECT *
             FROM football_chat_rooms
             WHERE is_group = 1
-              AND status = "active"
+              AND status = \"active\"
               AND (
-                  age_group_id IS NOT NULL
-                  OR class_id IS NOT NULL
+                  {$ageGroupPart} class_id IS NOT NULL
               )
-        ');
+        "
+        );
 
         return $stmt->fetchAll();
     }
