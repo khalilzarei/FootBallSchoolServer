@@ -96,6 +96,12 @@ class ClassScheduleService
         return ClassScheduleRepository::findById($scheduleId);
     }
 
+    public static function delete(int $scheduleId): void
+    {
+        self::requireSchedule($scheduleId);
+        ClassScheduleRepository::delete($scheduleId);
+    }
+
     private static function requireClass(int $classId): array
     {
         $class = ClassRepository::findById($classId);

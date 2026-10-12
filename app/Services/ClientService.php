@@ -58,7 +58,9 @@ class ClientService
 
     public static function schedule(): array
     {
-        return ClientRepository::scheduleForUser((int) Auth::id(), (string) Auth::role());
+        $role = (string) Auth::role();
+        if ($role === 'admin' && UserRepository::isCoach((int) Auth::id())) $role = 'coach';
+        return ClientRepository::scheduleForUser((int) Auth::id(), $role);
     }
 
     /**
@@ -146,6 +148,10 @@ class ClientService
     /** کلاس‌های فعال بازیکن (با مربی و برنامه هفتگی) */
     public static function classes(): array
     {
+        if (Auth::hasRole('coach') || UserRepository::isCoach((int) Auth::id())) {
+            return ClientRepository::classesForCoach((int) Auth::id());
+        }
+
         if (!Auth::hasRole('player')) return [];
 
         $player = ClientRepository::playerForUser((int) Auth::id());

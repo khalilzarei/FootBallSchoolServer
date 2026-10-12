@@ -7,6 +7,14 @@ use App\Core\Database;
 
 class UserRepository
 {
+    public static function isCoach(int $userId): bool
+    {
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare('SELECT 1 FROM football_coaches WHERE user_id = :user_id LIMIT 1');
+        $stmt->execute(['user_id' => $userId]);
+        return (bool) $stmt->fetchColumn();
+    }
+
     public static function findByIdentifier(string $identifier): ?array
     {
         $pdo = Database::connection();
@@ -140,7 +148,9 @@ class UserRepository
             'password_hash' => $data['password_hash'],
             'role' => $data['role'],
             'status' => $data['status'] ?? 'active',
-            'must_change_password' => 1,
+            'must_change_password' => isset($data['must_change_password'])
+                ? (int) $data['must_change_password']
+                : 1,
             'created_by' => $data['created_by'] ?? null,
         ]);
         return (int) $pdo->lastInsertId();
@@ -175,11 +185,15 @@ class UserRepository
         $stmt->execute(['id' => $id, 'avatar_path' => $avatarPath ?? '']);
     }
 
-    public static function resetPassword(int $id, string $passwordHash): void
+    public static function resetPassword(int $id, string $passwordHash, bool $mustChangePassword = true): void
     {
         $pdo = Database::connection();
-        $stmt = $pdo->prepare('UPDATE football_users SET password_hash = :password_hash, must_change_password = 1, updated_at = NOW() WHERE id = :id AND deleted_at IS NULL');
-        $stmt->execute(['id' => $id, 'password_hash' => $passwordHash]);
+        $stmt = $pdo->prepare('UPDATE football_users SET password_hash = :password_hash, must_change_password = :must_change_password, updated_at = NOW() WHERE id = :id AND deleted_at IS NULL');
+        $stmt->execute([
+            'id' => $id,
+            'password_hash' => $passwordHash,
+            'must_change_password' => $mustChangePassword ? 1 : 0,
+        ]);
     }
 
     public static function setStatus(int $id, string $status): void

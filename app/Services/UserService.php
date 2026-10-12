@@ -5,6 +5,8 @@ namespace App\Services;
 
 use App\Core\AppException;
 use App\Core\Auth;
+use App\Core\Database;
+use App\Repositories\PlayerRepository;
 use App\Repositories\UserRepository;
 use App\Repositories\UserTokenRepository;
 use App\Services\AvatarService; // ← ایمپورت سرویس آواتار
@@ -186,16 +188,39 @@ class UserService
     public static function resetPassword(int $id, array $data): array
     {
         if ($id === Auth::id()) throw new AppException('برای تغییر رمز خود از مسیر تغییر رمز استفاده کنید', 403);
-        self::requireUser($id);
+        $user = self::requireUser($id);
+        $isPlayer = ($user['role'] ?? '') === 'player';
 
-        $password = trim((string) ($data['password'] ?? '')) ?: self::generatePassword();
-        if (strlen($password) < 8) throw new AppException('رمز عبور باید حداقل ۸ کاراکتر باشد', 422);
+        if ($isPlayer) {
+            $player = PlayerRepository::findByUserId($id);
+            $password = trim((string) ($player['national_code'] ?? ''));
+            if ($password === '' || !preg_match('/^[0-9]{10}$/', $password)) {
+                throw new AppException('کد ملی معتبر برای بازیکن ثبت نشده است', 422);
+            }
+        } else {
+            $password = trim((string) ($data['password'] ?? '')) ?: self::generatePassword();
+            if (strlen($password) < 8) throw new AppException('رمز عبور باید حداقل ۸ کاراکتر باشد', 422);
+        }
 
-        UserRepository::resetPassword($id, password_hash($password, PASSWORD_DEFAULT));
-        UserTokenRepository::revokeAllForUser($id);
+        $pdo = Database::connection();
+        try {
+            $pdo->beginTransaction();
+            $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+            UserRepository::resetPassword($id, $passwordHash, !$isPlayer);
+            if ($isPlayer) {
+                // احراز هویت بازیکن از هش جدول football_players انجام می‌شود؛
+                // هش حساب کاربری و رکورد بازیکن را همزمان نگه می‌داریم.
+                PlayerRepository::updatePasswordByUserId($id, $passwordHash);
+            }
+            UserTokenRepository::revokeAllForUser($id);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
 
         $result = ['user_id' => $id];
-        if (empty($data['password'])) $result['new_password'] = $password;
+        if ($isPlayer || empty($data['password'])) $result['new_password'] = $password;
         return $result;
     }
 
@@ -346,7 +371,10 @@ class UserService
     {
         if (!$user) return [];
         unset($user['password_hash']);
-        $user['avatar_url'] = AvatarService::getAvatarUrl($user['avatar_path'] ?? null, 'user');
+        $user['avatar_url'] = AvatarService::getAvatarUrl(
+            $user['avatar_path'] ?? null,
+            AvatarService::defaultTypeForRole($user['role'] ?? null)
+        );
         return $user;
     }
 }

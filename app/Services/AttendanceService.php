@@ -30,7 +30,7 @@ class AttendanceService
         $session = self::requireSession($sessionId);
         $classId = (int) $session['class_id'];
 
-        $players = AttendanceRepository::listSheetPlayers($classId);
+        $players = AttendanceRepository::listSheetPlayers($classId, (string) $session['session_date']);
         $attendances = AttendanceRepository::listForSession($sessionId);
 
         $byPlayer = [];
@@ -86,8 +86,12 @@ class AttendanceService
                 $player = PlayerRepository::findById($playerId);
                 if (!$player) throw new AppException('بازیکن یافت نشد', 404);
 
-                if (!EnrollmentRepository::hasActiveEnrollment((int) $session['class_id'], $playerId)) {
-                    throw new AppException('بازیکن در این کلاس ثبت‌نام فعال ندارد', 422);
+                if (!EnrollmentRepository::hasEnrollmentOnDate(
+                    (int) $session['class_id'],
+                    $playerId,
+                    (string) $session['session_date']
+                )) {
+                    throw new AppException('بازیکن در تاریخ این جلسه عضو این کلاس نبوده است', 422);
                 }
 
                 $status = (string) ($item['status'] ?? '');

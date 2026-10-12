@@ -8,6 +8,7 @@ use App\Controllers\AuthController;
 use App\Controllers\UserController;
 use App\Controllers\GuardianController;
 use App\Controllers\PlayerController;
+use App\Controllers\PlayerRegistrationController;
 use App\Controllers\SeasonController;
 use App\Controllers\AgeGroupController;
 use App\Controllers\CoachController;
@@ -55,6 +56,9 @@ $router->delete('/api/v1/me/avatar', [UserController::class, 'deleteOwnAvatar'],
 */
 
 $router->post('/api/v1/auth/login', [AuthController::class, 'login']);
+
+// ثبت‌نام عمومی بازیکن؛ این مسیر admin/auth نمی‌خواهد.
+$router->post('/api/v1/player-registration', [PlayerRegistrationController::class, 'store']);
 
 $router->get('/api/v1/auth/me', [AuthController::class, 'me'], ['auth']);
 

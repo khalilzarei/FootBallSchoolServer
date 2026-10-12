@@ -6,11 +6,13 @@ namespace App\Services;
 
 use App\Core\AppException;
 use App\Core\Auth;
+use App\Core\Database;
 use App\Repositories\AgeGroupRepository;
 use App\Repositories\ClassRepository;
 use App\Repositories\CoachRepository;
 use App\Repositories\EnrollmentRepository;
 use App\Repositories\SeasonRepository;
+use App\Repositories\SessionRepository;
 use DateTime;
 
 class ClassService
@@ -235,12 +237,17 @@ class ClassService
     public static function delete(int $id): void
     {
         self::requireClass($id);
-
-        if (EnrollmentRepository::activeCount($id) > 0) {
-            throw new AppException('این کلاس دارای ثبت‌نام فعال است؛ ابتدا ثبت‌نام‌ها را پایان دهید', 409);
+        $pdo = Database::connection();
+        try {
+            $pdo->beginTransaction();
+            EnrollmentRepository::endActiveForClass($id);
+            SessionRepository::cancelFutureScheduledForClass($id);
+            ClassRepository::softDelete($id);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
         }
-
-        ClassRepository::softDelete($id);
     }
 
     private static function requireClass(int $id): array

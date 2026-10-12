@@ -134,6 +134,12 @@ class ClassScheduleRepository
         $stmt->execute(['id' => $id, 'status' => $status]);
     }
 
+    public static function delete(int $id): void
+    {
+        Database::connection()->prepare('DELETE FROM football_class_schedules WHERE id = :id')
+            ->execute(['id' => $id]);
+    }
+
     public static function existsDuplicate(int $classId, int $weekday, string $startTime, ?int $exceptId = null): bool
     {
         $pdo = Database::connection();

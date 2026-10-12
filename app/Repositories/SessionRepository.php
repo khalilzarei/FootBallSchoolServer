@@ -118,6 +118,64 @@ class SessionRepository
         return (bool) $stmt->fetch();
     }
 
+    public static function scheduledForClassFrom(int $classId, string $fromDate, string $fromTime): array
+    {
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare('
+            SELECT * FROM football_sessions
+            WHERE class_id = :class_id
+              AND (session_date > :after_date OR (session_date = :today_date AND start_time >= :from_time))
+              AND status = "scheduled"
+            ORDER BY session_date ASC, start_time ASC
+        ');
+        $stmt->execute([
+            'class_id' => $classId,
+            'after_date' => $fromDate,
+            'today_date' => $fromDate,
+            'from_time' => $fromTime,
+        ]);
+        return $stmt->fetchAll();
+    }
+
+    public static function hasAttendance(int $sessionId): bool
+    {
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare('SELECT id FROM football_attendances WHERE session_id = :session_id LIMIT 1');
+        $stmt->execute(['session_id' => $sessionId]);
+        return (bool) $stmt->fetch();
+    }
+
+    public static function deleteScheduledWithoutAttendance(int $sessionId): bool
+    {
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare('
+            DELETE FROM football_sessions
+            WHERE id = :id AND status = "scheduled"
+              AND NOT EXISTS (
+                  SELECT 1 FROM football_attendances a WHERE a.session_id = football_sessions.id
+              )
+        ');
+        $stmt->execute(['id' => $sessionId]);
+        return $stmt->rowCount() > 0;
+    }
+
+    public static function cancelFutureScheduledForClass(int $classId): void
+    {
+        $pdo = Database::connection();
+        $pdo->prepare('
+            UPDATE football_sessions
+            SET status = "cancelled",
+                notes = CASE
+                    WHEN notes IS NULL OR notes = "" THEN "کلاس آرشیو شد؛ این جلسه لغو شد."
+                    ELSE CONCAT(notes, "\nکلاس آرشیو شد؛ این جلسه لغو شد.")
+                END,
+                updated_at = NOW()
+            WHERE class_id = :class_id
+              AND (session_date > CURDATE() OR (session_date = CURDATE() AND start_time >= CURTIME()))
+              AND status = "scheduled"
+        ')->execute(['class_id' => $classId]);
+    }
+
     public static function create(array $data): int
     {
         $pdo = Database::connection();

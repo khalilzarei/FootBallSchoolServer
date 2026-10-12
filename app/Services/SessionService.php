@@ -159,6 +159,7 @@ class SessionService
         // پیش‌فرض «تا» = تاریخ پایان کلاس
         $from = trim((string) ($data['from_date'] ?? ''));
         $to = trim((string) ($data['to_date'] ?? ''));
+        $syncExisting = $from === '' && $to === '';
 
         if ($from === '') {
             $today = date('Y-m-d');
@@ -187,11 +188,9 @@ class SessionService
             return $s['status'] === 'active';
         });
 
-        if (empty($activeSchedules)) throw new AppException('برنامه هفتگی فعالی برای این کلاس وجود ندارد', 422);
-
         $weekdayMap = [6 => 1, 7 => 2, 1 => 3, 2 => 4, 3 => 5, 4 => 6, 5 => 7];
 
-        $created = 0;
+        $desired = [];
         $current = clone $startDate;
 
         while ($current <= $endDate) {
@@ -201,25 +200,54 @@ class SessionService
                 if ((int) $schedule['weekday'] !== $ourWeekday) continue;
 
                 $sessionDate = $current->format('Y-m-d');
-
-                if (SessionRepository::exists($classId, $sessionDate, $schedule['start_time'])) continue;
-
-                SessionRepository::create([
+                $startTime = (string) $schedule['start_time'];
+                if ($syncExisting && $sessionDate === date('Y-m-d') && $startTime < date('H:i:s')) {
+                    continue;
+                }
+                $desired[$sessionDate . '|' . $startTime] = [
                     'class_id' => $classId,
                     'session_date' => $sessionDate,
-                    'start_time' => $schedule['start_time'],
-                    'end_time' => $schedule['end_time'],
+                    'start_time' => $startTime,
+                    'end_time' => (string) $schedule['end_time'],
                     'location' => $schedule['location'] ?? $class['location'],
-                    'status' => 'scheduled',
-                    'topic' => null,
-                    'notes' => null,
-                    'created_by' => Auth::id(),
-                ]);
-
-                $created++;
+                ];
             }
 
             $current->modify('+1 day');
+        }
+
+        // همگام‌سازی جلسات آینده‌ی تولیدشده قبلی با برنامه‌ی جدید.
+        // جلسات دارای حضورغیاب حذف نمی‌شوند؛ جلسات برگزارشده/لغوشده نیز در این فهرست نیستند.
+        if ($syncExisting) {
+            foreach (SessionRepository::scheduledForClassFrom($classId, date('Y-m-d'), date('H:i:s')) as $existing) {
+                $key = (string) $existing['session_date'] . '|' . (string) $existing['start_time'];
+                if (isset($desired[$key])) {
+                    $slot = $desired[$key];
+                    if ((string) $existing['end_time'] !== $slot['end_time'] || ($existing['location'] ?? null) !== $slot['location']) {
+                        SessionRepository::update((int) $existing['id'], [
+                            'end_time' => $slot['end_time'],
+                            'location' => $slot['location'],
+                        ]);
+                    }
+                    unset($desired[$key]);
+                    continue;
+                }
+
+                SessionRepository::deleteScheduledWithoutAttendance((int) $existing['id']);
+            }
+        }
+
+        $created = 0;
+        foreach ($desired as $slot) {
+            // وضعیت لغو/برگزاری دستی همان تاریخ و ساعت را با تولید خودکار بازنویسی نکن.
+            if (SessionRepository::exists($classId, $slot['session_date'], $slot['start_time'])) continue;
+            SessionRepository::create(array_merge($slot, [
+                'status' => 'scheduled',
+                'topic' => null,
+                'notes' => null,
+                'created_by' => Auth::id(),
+            ]));
+            $created++;
         }
 
         return [

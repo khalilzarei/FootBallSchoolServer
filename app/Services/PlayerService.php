@@ -396,7 +396,7 @@ class PlayerService
     /**
      * ساخت حساب ورود بازیکن (کاربر با نقش player).
      * شناسه ورود و رمز اولیه = کد ملی بازیکن؛ بدون کد ملی حساب ساخته نمی‌شود.
-     * must_change_password=1 است تا در اولین ورود رمز عوض شود.
+     * بازیکن با کد ملی وارد می‌شود و در اولین ورود مجبور به تغییر رمز نیست.
      */
     private static function createPlayerLogin(int $playerId, string $fullName, ?string $nationalCode, ?string $mobile = null): void
     {
@@ -420,7 +420,7 @@ class PlayerService
             return;
         }
 
-        // رمز اولیه = کد ملی بازیکن (هش‌شده) — در اولین ورود اجباری عوض می‌شود
+        // شناسه ورود و رمز اولیه = کد ملی بازیکن (رمز در دیتابیس هش‌شده ذخیره می‌شود).
         $passwordHash = password_hash($nationalCode, PASSWORD_DEFAULT);
 
         $userId = UserRepository::create([
@@ -431,6 +431,7 @@ class PlayerService
             'password_hash' => $passwordHash,
             'role' => 'player',
             'status' => 'active',
+            'must_change_password' => 0,
             'created_by' => Auth::id(),
         ]);
 

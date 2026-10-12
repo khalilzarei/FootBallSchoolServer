@@ -99,4 +99,15 @@ class ClassScheduleController
             Response::error($e->getMessage(), $e->getCode() ?: 400);
         }
     }
+
+    public function destroy(Request $request, array $params = []): void
+    {
+        $scheduleId = (int) ($params['id'] ?? 0);
+        try {
+            ClassScheduleService::delete($scheduleId);
+            Response::success('برنامه هفتگی حذف شد');
+        } catch (AppException $e) {
+            Response::error($e->getMessage(), $e->getCode() ?: 400);
+        }
+    }
 }

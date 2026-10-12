@@ -125,19 +125,26 @@ class AttendanceRepository
      * بازیکنان ثبت‌نام‌شده کلاس برای برگه حضور و غیاب
      * (همان ترتیب لیست «بازیکنان کلاس»: جدیدترین ثبت‌نام اول)
      */
-    public static function listSheetPlayers(int $classId): array
+    public static function listSheetPlayers(int $classId, string $sessionDate): array
     {
         $pdo = Database::connection();
 
         $stmt = $pdo->prepare('
-            SELECT e.player_id, p.first_name, p.last_name, p.avatar_path
+            SELECT DISTINCT e.player_id, p.first_name, p.last_name, p.avatar_path
             FROM football_enrollments e
             INNER JOIN football_players p ON p.id = e.player_id
-            WHERE e.class_id = :class_id AND p.deleted_at IS NULL
-            ORDER BY e.id DESC
+            WHERE e.class_id = :class_id
+              AND e.enrolled_at <= :session_date
+              AND (e.ended_at IS NULL OR e.ended_at >= :session_date_end)
+              AND p.deleted_at IS NULL
+            ORDER BY p.first_name ASC, p.last_name ASC
         ');
 
-        $stmt->execute(['class_id' => $classId]);
+        $stmt->execute([
+            'class_id' => $classId,
+            'session_date' => $sessionDate,
+            'session_date_end' => $sessionDate,
+        ]);
 
         return $stmt->fetchAll();
     }

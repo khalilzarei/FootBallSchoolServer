@@ -143,6 +143,25 @@ class ChatRepository
         return $stmt->fetchAll();
     }
 
+    /** همه‌ی حساب‌های فعال را به‌صورت گروهی عضو اتاق می‌کند. */
+    public static function syncActiveUsersAsMembers(int $roomId): void
+    {
+        $stmt = Database::connection()->prepare('
+            INSERT INTO football_chat_room_members (
+                chat_room_id, user_id, member_role, joined_at,
+                is_muted, status, created_at
+            )
+            SELECT :room_id, u.id, "member", NOW(), 0, "active", NOW()
+            FROM football_users u
+            WHERE u.status = "active"
+              AND u.deleted_at IS NULL
+            ON DUPLICATE KEY UPDATE
+                status = "active",
+                updated_at = NOW()
+        ');
+        $stmt->execute(['room_id' => $roomId]);
+    }
+
     public static function findById(int $id): ?array
     {
         $pdo = Database::connection();

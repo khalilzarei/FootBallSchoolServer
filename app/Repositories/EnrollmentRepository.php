@@ -153,6 +153,16 @@ class EnrollmentRepository
         return (int) $stmt->fetch()['total'];
     }
 
+    public static function endActiveForClass(int $classId): void
+    {
+        $pdo = Database::connection();
+        $pdo->prepare('
+            UPDATE football_enrollments
+            SET status = "inactive", ended_at = COALESCE(ended_at, CURDATE()), updated_at = NOW()
+            WHERE class_id = :class_id AND status = "active"
+        ')->execute(['class_id' => $classId]);
+    }
+
     public static function hasActiveEnrollment(int $classId, int $playerId): bool
     {
         $pdo = Database::connection();
@@ -164,6 +174,29 @@ class EnrollmentRepository
         ');
 
         $stmt->execute(['class_id' => $classId, 'player_id' => $playerId]);
+
+        return (bool) $stmt->fetch();
+    }
+
+    public static function hasEnrollmentOnDate(int $classId, int $playerId, string $date): bool
+    {
+        $pdo = Database::connection();
+
+        $stmt = $pdo->prepare('
+            SELECT id FROM football_enrollments
+            WHERE class_id = :class_id
+              AND player_id = :player_id
+              AND enrolled_at <= :session_date
+              AND (ended_at IS NULL OR ended_at >= :session_date_end)
+            LIMIT 1
+        ');
+
+        $stmt->execute([
+            'class_id' => $classId,
+            'player_id' => $playerId,
+            'session_date' => $date,
+            'session_date_end' => $date,
+        ]);
 
         return (bool) $stmt->fetch();
     }

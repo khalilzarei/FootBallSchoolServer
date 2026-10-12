@@ -17,11 +17,15 @@ class ChatService
 {
     private const MESSAGE_TYPES = ['text', 'image', 'video', 'file', 'system'];
 
-    private const DEFAULT_GROUP_IMAGE = '/uploads/chat/default-group.webp';
+    private const LEGACY_DEFAULT_GROUP_IMAGE = '/uploads/chat/default-group.webp';
+    private const DEFAULT_GROUP_IMAGE = '/storage/default_avatars/team_group_default.png';
+    private const GLOBAL_ROOM_KEY = 'global_broadcast_room';
 
     public static function rooms(): array
     {
         $currentUserId = (int) Auth::id();
+
+        self::ensureGlobalChatRoom($currentUserId);
 
         $rooms = ChatRepository::roomsForUser($currentUserId);
         $memberRoomIds = array_map(
@@ -115,6 +119,47 @@ class ChatService
         }
 
         return $result;
+    }
+
+    /** اتاق همگانی را ایجاد و عضویت همه‌ی حساب‌های فعال را همگام می‌کند. */
+    private static function ensureGlobalChatRoom(int $currentUserId): void
+    {
+        $room = ChatRepository::findByUniqueKey(self::GLOBAL_ROOM_KEY);
+        $createdBy = ChatRepository::firstActiveAdminId() ?? $currentUserId;
+
+        if (!$room) {
+            try {
+                $roomId = ChatRepository::createRoom([
+                    'room_type' => 'global',
+                    'is_group' => true,
+                    'user1_id' => null,
+                    'user2_id' => null,
+                    'title' => 'گفتگوی همگانی',
+                    'image' => self::DEFAULT_GROUP_IMAGE,
+                    'player_id' => null,
+                    'class_id' => null,
+                    'age_group_id' => null,
+                    'subject' => null,
+                    'unique_key' => self::GLOBAL_ROOM_KEY,
+                    'status' => 'active',
+                    'created_by' => $createdBy,
+                ]);
+            } catch (\Throwable $e) {
+                // درخواست هم‌زمان ممکن است همین اتاق را ساخته باشد.
+                $room = ChatRepository::findByUniqueKey(self::GLOBAL_ROOM_KEY);
+                if (!$room) {
+                    throw $e;
+                }
+                $roomId = (int) $room['id'];
+            }
+        } else {
+            $roomId = (int) $room['id'];
+            if ((string) ($room['status'] ?? '') !== 'active') {
+                ChatRepository::setRoomStatus($roomId, 'active');
+            }
+        }
+
+        ChatRepository::syncActiveUsersAsMembers($roomId);
     }
 
     /**
@@ -1568,7 +1613,9 @@ class ChatService
             );
 
             if ($image === '') {
-                $image = self::DEFAULT_GROUP_IMAGE;
+                $image = AvatarService::getDefaultUrl('team_group');
+            } elseif ($image === self::DEFAULT_GROUP_IMAGE || $image === self::LEGACY_DEFAULT_GROUP_IMAGE) {
+                $image = AvatarService::getDefaultUrl('team_group');
             }
         }
 

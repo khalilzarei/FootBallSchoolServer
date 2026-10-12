@@ -93,29 +93,17 @@ class ClientRepository
     {
         $pdo = Database::connection();
 
-        // پنجره: ۱۴ روز گذشته تا آینده — تا توضیحات/موضوع جلسات برگزارشده هم دیده شود
+        // مدیر باید تاریخچه کامل کلاس‌های خودش را برای ثبت نتیجه و عملکرد ببیند.
+        // بازیکن و مربی همان بازه محدود برنامه را دریافت می‌کنند.
 
         if ($role === 'admin') {
-            // ادمینِ هم‌زمان مربی: فقط کلاس‌های خودش (و کلاس‌های هم‌گروه سنی‌اش) — نه همه کلاس‌ها
-            $classIds = self::coachScopedClassIds($userId);
-
-            if (empty($classIds)) {
-                // ادمین بدون کلاس مربی‌گری → همه جلسات
-                $stmt = $pdo->prepare('
-                    SELECT s.*, c.title AS class_title
-                    FROM football_sessions s
-                    INNER JOIN football_classes c ON c.id = s.class_id
-                    WHERE s.session_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-                      AND s.status IN ("scheduled", "makeup", "completed")
-                    ORDER BY s.session_date ASC, s.start_time ASC
-                    LIMIT 100
-                ');
-                $stmt->execute();
-                return $stmt->fetchAll();
-            }
+            // ادمین فقط جلسات کلاس‌هایی را می‌بیند که ساخته یا به او تخصیص داده شده‌اند.
+            // اگر کلاسی در scope او نباشد، نباید همه جلسات سیستم نمایش داده شوند.
+            $classIds = self::adminScopedClassIds($userId);
+            if (empty($classIds)) return [];
         } elseif ($role === 'coach') {
-            // مربی: کلاس‌های خودش + کلاس‌های هم‌گروه سنی‌اش (مربی می‌تواند چند کلاس داشته باشد)
-            $classIds = self::coachScopedClassIds($userId);
+            // مربی فقط جلسات کلاس‌هایی را می‌بیند که به‌عنوان سرمربی یا کمکی به او تخصیص داده شده‌اند.
+            $classIds = self::coachAssignedClassIds($userId);
 
             if (empty($classIds)) {
                 return [];
@@ -131,15 +119,20 @@ class ClientRepository
 
         [$inClause, $params] = self::makeInClause($classIds, 'cid');
 
+        $dateFilter = $role === 'admin'
+            ? '1 = 1'
+            : 's.session_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)';
+        $limit = $role === 'admin' ? 500 : 100;
+
         $stmt = $pdo->prepare("
             SELECT s.*, c.title AS class_title
             FROM football_sessions s
             INNER JOIN football_classes c ON c.id = s.class_id
-            WHERE s.session_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-              AND s.status IN (\"scheduled\", \"makeup\", \"completed\")
+            WHERE {$dateFilter}
+              AND s.status IN (\"scheduled\", \"makeup\", \"completed\", \"cancelled\")
               AND s.class_id IN ({$inClause})
             ORDER BY s.session_date ASC, s.start_time ASC
-            LIMIT 100
+            LIMIT {$limit}
         ");
 
         $stmt->execute($params);
@@ -455,7 +448,9 @@ class ClientRepository
         $stmt = $pdo->prepare("
             SELECT c.id, c.title, c.location, c.description, c.capacity, c.status,
                    ag.title AS age_group_title,
-                   cu.full_name AS coach_name,
+                   COALESCE(cu.full_name, acu.full_name) AS coach_name,
+                   COALESCE(co.id, aco.id) AS coach_id,
+                   COALESCE(co.user_id, aco.user_id) AS coach_user_id,
                    acu.full_name AS assistant_coach_name,
                    (SELECT COUNT(*) FROM football_enrollments e2
                     WHERE e2.class_id = c.id AND e2.status = 'active' AND e2.ended_at IS NULL) AS enrolled_count
@@ -500,6 +495,8 @@ class ClientRepository
                 'title' => (string) $c['title'],
                 'age_group_title' => $c['age_group_title'] ?? null,
                 'coach_name' => $c['coach_name'] ?? null,
+                'coach_id' => isset($c['coach_id']) ? (int) $c['coach_id'] : null,
+                'coach_user_id' => isset($c['coach_user_id']) ? (int) $c['coach_user_id'] : null,
                 'assistant_coach_name' => $c['assistant_coach_name'] ?? null,
                 'location' => $c['location'] ?? null,
                 'description' => $c['description'] ?? null,
@@ -509,6 +506,59 @@ class ClientRepository
             ];
         }
         return $out;
+    }
+
+    /** کلاس‌ها و فهرست بازیکنان مربی واردشده. */
+    public static function classesForCoach(int $userId): array
+    {
+        $classIds = self::coachAssignedClassIds($userId);
+        if ($classIds === []) return [];
+
+        [$inClause, $params] = self::makeInClause($classIds, 'coach_class');
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare(
+            'SELECT c.id, c.title, c.location, c.description, ag.title AS age_group_title
+             FROM football_classes c
+             LEFT JOIN football_age_groups ag ON ag.id = c.age_group_id
+             WHERE c.id IN (' . $inClause . ')
+             ORDER BY c.title'
+        );
+        $stmt->execute($params);
+        $classes = $stmt->fetchAll();
+
+        foreach ($classes as &$class) {
+            $playersStmt = $pdo->prepare('
+                SELECT DISTINCT p.id AS player_id, p.first_name, p.last_name,
+                       p.mobile, p.avatar_path
+                FROM football_enrollments e
+                INNER JOIN football_players p ON p.id = e.player_id
+                WHERE e.class_id = :class_id
+                  AND e.status = "active"
+                  AND e.ended_at IS NULL
+                  AND p.status = "active"
+                  AND p.deleted_at IS NULL
+                ORDER BY p.first_name, p.last_name
+            ');
+            $playersStmt->execute(['class_id' => (int) $class['id']]);
+            $class['players'] = array_map(static function (array $player): array {
+                return [
+                    'id' => (int) $player['player_id'],
+                    'full_name' => trim((string) $player['first_name'] . ' ' . (string) $player['last_name']),
+                    'mobile' => $player['mobile'] ?? null,
+                    'avatar_url' => AvatarService::getAvatarUrl($player['avatar_path'] ?? null, 'player'),
+                ];
+            }, $playersStmt->fetchAll());
+            $class['id'] = (int) $class['id'];
+            $class['player_count'] = count($class['players']);
+        }
+        unset($class);
+
+        return $classes;
+    }
+
+    public static function coachCanAccessClass(int $userId, int $classId): bool
+    {
+        return in_array($classId, self::coachAssignedClassIds($userId), true);
     }
 
     // ═════════════════════════════════════════════
@@ -686,59 +736,50 @@ class ClientRepository
     // ابزارهای مشترک
     // ═════════════════════════════════════════════
 
-    private static function coachScopedClassIds(int $userId): array
+    /** کلاس‌های فعال ساخته‌شده توسط ادمین یا تخصیص‌یافته به او. */
+    private static function adminScopedClassIds(int $userId): array
     {
         $pdo = Database::connection();
 
+        $stmt = $pdo->prepare('
+            SELECT DISTINCT c.id
+            FROM football_classes c
+            LEFT JOIN football_coaches head_coach
+              ON head_coach.id = c.coach_id AND head_coach.user_id = :head_user_id
+            LEFT JOIN football_coaches assistant_coach
+              ON assistant_coach.id = c.assistant_coach_id AND assistant_coach.user_id = :assistant_user_id
+            WHERE c.status = "active" AND c.deleted_at IS NULL
+              AND (c.created_by = :created_by OR head_coach.id IS NOT NULL OR assistant_coach.id IS NOT NULL)
+        ');
+        $stmt->execute([
+            'head_user_id' => $userId,
+            'assistant_user_id' => $userId,
+            'created_by' => $userId,
+        ]);
+
+        return array_map('intval', array_column($stmt->fetchAll(), 'id'));
+    }
+
+    /** فقط کلاس‌هایی که سرمربی یا مربی کمکی‌شان همین کاربر است. */
+    private static function coachAssignedClassIds(int $userId): array
+    {
+        $pdo = Database::connection();
         $stmt = $pdo->prepare('SELECT id FROM football_coaches WHERE user_id = :user_id LIMIT 1');
         $stmt->execute(['user_id' => $userId]);
         $coach = $stmt->fetch();
-
-        if (!$coach) {
-            return [];
-        }
+        if (!$coach) return [];
 
         $coachId = (int) $coach['id'];
-
-        // کلاس‌های خود مربی (سرمربی یا کمکی) — فعال و حذف‌نشده
         $stmt = $pdo->prepare('
-            SELECT id, age_group_id
+            SELECT id
             FROM football_classes
-            WHERE (coach_id = :coach_id OR assistant_coach_id = :coach_id_2)
+            WHERE (coach_id = :coach_id OR assistant_coach_id = :assistant_coach_id)
               AND status = "active" AND deleted_at IS NULL
+            ORDER BY title
         ');
-        $stmt->execute(['coach_id' => $coachId, 'coach_id_2' => $coachId]);
-        $ownClasses = $stmt->fetchAll();
+        $stmt->execute(['coach_id' => $coachId, 'assistant_coach_id' => $coachId]);
 
-        if (empty($ownClasses)) {
-            return [];
-        }
-
-        $classIds = array_map('intval', array_column($ownClasses, 'id'));
-
-        // گروه‌های سنی کلاس‌های خود مربی (null نادیده گرفته می‌شود)
-        $ageGroupIds = [];
-        foreach ($ownClasses as $c) {
-            $ag = $c['age_group_id'] ?? null;
-            if ($ag !== null && (int) $ag > 0) {
-                $ageGroupIds[(int) $ag] = true;
-            }
-        }
-        $ageGroupIds = array_keys($ageGroupIds);
-
-        if (empty($ageGroupIds)) {
-            return $classIds;
-        }
-
-        // + کلاس‌های فعالِ هم‌گروه سنی
-        [$in, $params] = self::makeInClause($ageGroupIds, 'ag');
-        $stmt = $pdo->prepare("
-            SELECT id FROM football_classes
-            WHERE age_group_id IN ({$in}) AND status = 'active' AND deleted_at IS NULL
-        ");
-        $stmt->execute($params);
-
-        return array_values(array_unique(array_merge($classIds, array_map('intval', array_column($stmt->fetchAll(), 'id')))));
+        return array_map('intval', array_column($stmt->fetchAll(), 'id'));
     }
 
     private static function coachClassIds(int $userId): array

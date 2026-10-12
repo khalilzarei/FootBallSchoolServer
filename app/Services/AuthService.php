@@ -62,6 +62,7 @@ class AuthService
         UserRepository::updateLastLogin((int) $user['id']);
 
         unset($user['password_hash']);
+        $user['is_coach'] = UserRepository::isCoach((int) $user['id']);
 
         return [
             'token' => $token,
